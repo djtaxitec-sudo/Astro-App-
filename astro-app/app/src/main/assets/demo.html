@@ -1,0 +1,1241 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Astro Steuerung</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Aufbau: Kopfzeile (Status, Nachtmodus, STOPP) / Arbeitsfläche / Schrittleiste. Tablet: rechte Spalte mit Live-Bild und Guiding.
+   Drei Nachtmodi ersetzen hier das Hell/Dunkel des Betrachters: normal (blau), dunkel, rot (reines Rotlicht). */
+:root{
+  --bg:#0A0E16; --panel:#141B27; --panel2:#1B2433; --line:#26324A; --fg:#E8EDF5; --dim:#93A2BE; --mute:#7C8AA5;
+  --accent:#4FD1C5; --accent-ink:#06231F; --ok:#4ADE80; --warn:#F2B84B; --bad:#E5484D; --bad-ink:#fff;
+  --sky:#0D1424; --map-grid:#1E2A44; --map-line:#34476B; --map-name:#6B7FA6; --map-meridian:#5FA8C4; --map-ground:rgba(6,9,16,.72);
+  --map-horizon:#2D3B58; --map-star:201,214,238; --map-dso:#7DD3FC; --map-mount:#F2B84B; --map-target:#4FD1C5; --map-label:#8CA0C8;
+  color-scheme:dark;
+  --r:16px; --font:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+}
+:root[data-night="dunkel"]{
+  --bg:#04060A; --panel:#0B1018; --panel2:#101722; --line:#1A2335; --fg:#A9B4C8; --dim:#74829C; --mute:#5C6A84;
+  --accent:#3FA79D; --accent-ink:#031512; --ok:#3BAA6A; --warn:#B58A38; --bad:#B03A3F;
+  --sky:#070B14; --map-grid:#111A2C; --map-line:#222F4A; --map-name:#47577A; --map-meridian:#3D7186; --map-ground:rgba(2,4,8,.78);
+  --map-horizon:#1C2740; --map-star:140,152,176; --map-dso:#5FA9C9; --map-mount:#B58A38; --map-target:#3FA79D; --map-label:#64769C;
+}
+:root[data-night="rot"]{
+  --bg:#050000; --panel:#120303; --panel2:#1A0504; --line:#3A0D09; --fg:#E03A2A; --dim:#A82A1D; --mute:#7A1F16;
+  --accent:#E8452F; --accent-ink:#1A0000; --ok:#C8402E; --warn:#E85A3C; --bad:#8E1209; --bad-ink:#FFD8D0;
+  --sky:#0A0101; --map-grid:#2A0906; --map-line:#5E1B14; --map-name:#8A2A1E; --map-meridian:#C8402E; --map-ground:rgba(40,6,3,.6);
+  --map-horizon:#C8402E; --map-star:255,120,90; --map-dso:#FF7A5C; --map-mount:#FF7A5C; --map-target:#FFD0C0; --map-label:#B8362A;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 var(--font);overflow:hidden;
+  padding-left:max(10px,env(safe-area-inset-left,0px));padding-right:max(10px,env(safe-area-inset-right,0px))}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+h2{margin:0;font-size:18px;font-weight:700}
+h3{margin:0 0 6px;font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--mute)}
+small,.dim{color:var(--dim)}
+.num{font-variant-numeric:tabular-nums}
+#app{height:100%;display:flex;flex-direction:column;max-width:1500px;margin:0 auto}
+/* Kopf */
+#top{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 0 6px}
+#brand{font-weight:700;font-size:16px;letter-spacing:.02em;margin-right:4px}
+#pills{display:flex;gap:6px;overflow-x:auto;flex:1 1 100%;order:3;padding-bottom:2px;scrollbar-width:none}
+#pills::-webkit-scrollbar{display:none}
+.pill{display:flex;align-items:center;gap:6px;white-space:nowrap;background:var(--panel);border:0;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:500;min-height:32px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--mute)}
+.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+.grow{flex:1}
+.iconbtn{width:44px;height:44px;border-radius:12px;border:0;background:var(--panel);display:flex;align-items:center;justify-content:center;padding:0;flex:none}
+.stopbtn{height:44px;min-width:84px;padding:0 16px;border-radius:12px;border:0;background:var(--bad);color:var(--bad-ink);font-weight:700;font-size:15px;letter-spacing:.04em;flex:none}
+#nightLabel{font-size:10px;color:var(--mute);margin-top:-2px}
+/* Arbeitsfläche */
+#main{flex:1;min-height:0;display:grid;grid-template-columns:1fr;gap:12px;padding-bottom:4px}
+#screens{position:relative;min-height:0;min-width:0}
+.screen{position:absolute;inset:0;overflow:auto;display:none;padding:2px 2px 8px;scrollbar-width:thin}
+.screen.on{display:block}
+.screen.map.on{display:flex;flex-direction:column;gap:10px;overflow:hidden;padding:0}
+#side{display:none;min-height:0;overflow:auto;flex-direction:column;gap:10px}
+.stack{display:flex;flex-direction:column;gap:12px;max-width:760px;margin:0 auto}
+.card{background:var(--panel);border-radius:var(--r);padding:14px 16px;min-width:0}
+.card.line{border:1px solid var(--line);background:transparent}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.row.between{justify-content:space-between}
+.col{display:flex;flex-direction:column;gap:6px;min-width:0}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.three{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.btn{min-height:48px;padding:0 18px;border-radius:14px;border:0;background:var(--panel2);font-weight:600;font-size:15px;display:inline-flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap}
+.btn.primary{background:var(--accent);color:var(--accent-ink);font-weight:700}
+.btn.danger{background:var(--bad);color:var(--bad-ink)}
+.btn.ghost{background:transparent;border:1px solid var(--line)}
+.btn.sm{min-height:40px;padding:0 14px;font-size:13px}
+.btn:disabled{opacity:.45;cursor:default}
+.btn.block{width:100%}
+.seg{display:flex;background:var(--panel2);border-radius:12px;padding:3px;gap:3px}
+.seg button{flex:1;border:0;background:transparent;border-radius:9px;min-height:40px;padding:0 10px;font-size:13px;font-weight:600;color:var(--dim)}
+.seg button.on{background:var(--accent);color:var(--accent-ink)}
+.field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.field>span{font-size:11px;color:var(--mute);font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.inp{height:46px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);padding:0 12px;width:100%;min-width:0;font-size:15px}
+.inp:focus-visible,.btn:focus-visible,.seg button:focus-visible,.pill:focus-visible,.step:focus-visible,.iconbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.stepper{display:flex;align-items:stretch;background:var(--panel2);border-radius:12px;overflow:hidden;border:1px solid var(--line)}
+.stepper button{width:46px;border:0;background:transparent;font-size:22px;font-weight:500;color:var(--accent)}
+.stepper input{flex:1;min-width:0;text-align:center;border:0;background:transparent;font-size:16px;font-weight:600;height:46px;font-variant-numeric:tabular-nums}
+.stepper small{align-self:center;padding-right:10px}
+@media (max-width:520px){.three .stepper button{width:34px;font-size:20px}.three .stepper small{display:none}.three .stepper input{font-size:15px}}
+.bar{height:8px;border-radius:99px;background:var(--panel2);overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--accent);border-radius:99px;transition:width .4s}
+.tag{display:inline-block;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600;background:var(--panel2);color:var(--dim)}
+.tag.ok{background:color-mix(in srgb,var(--ok) 22%,transparent);color:var(--ok)}
+.tag.warn{background:color-mix(in srgb,var(--warn) 22%,transparent);color:var(--warn)}
+.tag.bad{background:color-mix(in srgb,var(--bad) 28%,transparent);color:var(--bad)}
+.log{font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;color:var(--dim);white-space:pre-wrap;max-height:9.5em;overflow:auto}
+.big{font-size:44px;font-weight:700;line-height:1.05;font-variant-numeric:tabular-nums}
+.mid{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+.note{font-size:13px;color:var(--dim)}
+.warnbox{border-radius:12px;padding:10px 12px;background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn);font-size:13px}
+/* Schrittleiste */
+#steps{display:flex;padding:4px 0 max(10px,env(safe-area-inset-bottom,0px))}
+.step{flex:1;min-width:0;border:0;background:none;color:var(--mute);display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 0;font-size:11px;font-weight:500;min-height:58px;border-radius:14px}
+.step.on{background:var(--panel2);color:var(--accent);font-weight:700}
+.step.done{color:var(--ok)}
+.step svg{width:22px;height:22px}
+/* Karte */
+#mapwrap{position:relative;flex:1;min-height:200px;border-radius:20px;overflow:hidden;background:var(--sky)}
+#map{position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block}
+.fab{position:absolute;height:46px;border-radius:14px;border:0;background:color-mix(in srgb,var(--panel) 92%,transparent);display:flex;align-items:center;gap:8px;padding:0 14px;font-weight:500;font-size:14px}
+.fab.sq{width:46px;padding:0;justify-content:center}
+#q{position:absolute;left:12px;top:12px;right:12px;display:flex;gap:8px}
+#q input{flex:1;min-width:0;height:46px;border-radius:14px;border:0;background:color-mix(in srgb,var(--panel) 92%,transparent);padding:0 14px}
+#results,#tips,#layers{position:absolute;left:12px;right:12px;top:66px;max-height:60%;overflow:auto;background:var(--panel);border-radius:16px;padding:6px 10px;display:none;z-index:3;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+#layers{left:auto;min-width:250px}
+.li{padding:11px 4px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:10px;cursor:pointer}
+.li:last-child{border:0}
+.chk{display:flex;gap:12px;align-items:center;padding:9px 2px}
+.chk input{width:22px;height:22px;accent-color:var(--accent)}
+#targetCard{display:block;flex:none}
+#q .fab{position:static;flex:none}
+#targetCard .info{flex:1;min-width:0}
+#targetCard .t{font-size:18px;font-weight:700;line-height:1.2}
+/* Bild */
+.viewer{position:relative;background:#000;border-radius:16px;overflow:hidden;aspect-ratio:3/2;width:100%}
+.viewer canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.viewer .cap{position:absolute;left:10px;top:8px;font-size:12px;background:rgba(0,0,0,.55);padding:3px 8px;border-radius:8px;color:#ddd}
+.viewer .busy{position:absolute;inset:auto 0 0 0;height:4px;background:var(--accent);transform-origin:left;transform:scaleX(0)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.stats div{background:var(--panel2);border-radius:12px;padding:8px 10px;min-width:0}
+.stats b{display:block;font-size:18px;font-variant-numeric:tabular-nums}
+.stats span{font-size:11px;color:var(--mute)}
+.thumbs{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+.thumbs canvas{width:84px;height:56px;border-radius:8px;background:#000;flex:none;border:2px solid transparent}
+.thumbs canvas.on{border-color:var(--accent)}
+canvas.graph{width:100%;height:120px;display:block;border-radius:12px;background:var(--panel2)}
+/* Serie */
+.seqrow{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.seqrow:last-child{border:0}
+.seqrow .ic{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--panel2);color:var(--mute);flex:none;font-size:13px;font-weight:700}
+.seqrow.done .ic{background:var(--ok);color:#04130a}
+.seqrow.run .ic{background:var(--accent);color:var(--accent-ink)}
+.seqrow .tx{flex:1;min-width:0}
+/* Einstellungen */
+#sheet{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-end;justify-content:center;z-index:20}
+#sheet.on{display:flex}
+#sheet .box{width:min(720px,100%);max-height:92%;background:var(--bg);border-radius:20px 20px 0 0;padding:16px max(16px,env(safe-area-inset-left,0px)) max(16px,env(safe-area-inset-bottom,0px));overflow:auto;border:1px solid var(--line)}
+#sheet h4{margin:16px 0 8px;font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.demo{position:fixed;right:6px;top:calc(env(safe-area-inset-top,0px) + 1px);background:var(--warn);color:#1b1200;border-radius:999px;padding:1px 10px;font-size:10px;font-weight:700;z-index:9;pointer-events:none;letter-spacing:.04em}
+@media (orientation:landscape) and (min-width:640px){
+  #main{grid-template-columns:minmax(0,1fr) clamp(280px,32vw,380px)}
+  #side{display:flex}
+  #pills{flex:1 1 auto;order:0}
+  #top{flex-wrap:nowrap}
+  .step{flex-direction:row;justify-content:center;gap:8px;font-size:13px;min-height:50px}
+  .screen.map.on{flex-direction:row}
+  #targetCard{width:290px}
+}
+@media (orientation:landscape) and (max-height:520px){
+  #top{padding:4px 0 2px;gap:6px}.iconbtn,.stopbtn{height:38px}.iconbtn{width:38px}.pill{min-height:28px;padding:4px 10px}
+  #steps{padding-bottom:max(4px,env(safe-area-inset-bottom,0px))}.step{min-height:40px;font-size:12px;padding:2px 0}
+  #gdStrip{min-height:30px;padding:3px 12px}.big{font-size:34px}#targetCard{width:250px}
+  #app[data-screen=ziel] #side{display:none}#app[data-screen=ziel] #main{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:420px){.stats{grid-template-columns:repeat(2,1fr)}.big{font-size:38px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+#gdStrip{display:none;align-items:center;gap:10px;width:100%;border:0;background:var(--panel);color:var(--fg);padding:6px 14px;font-size:13px;min-height:38px;text-align:left}
+#gdStrip.on{display:flex}#gdStrip .gl{color:var(--accent);font-weight:600}#gdStrip b{font-size:16px}#gdStrip canvas{flex:1;height:26px;min-width:0}
+#rotBar{position:absolute;right:12px;bottom:12px;display:flex;align-items:center;gap:6px;background:color-mix(in srgb,var(--panel) 92%,transparent);border-radius:14px;padding:4px 6px;font-size:11px;color:var(--dim)}
+#rotBar .stepper{width:122px;border-radius:10px}#rotBar .stepper button{width:30px}#rotBar .stepper input{height:36px;font-size:14px}#rotBar .btn{min-height:36px;padding:0 10px}
+#rotBar>span{display:none}
+.viewer{cursor:zoom-in}
+#fs{position:fixed;inset:0;background:#000;z-index:30;display:none;touch-action:none}#fs.on{display:block}#fs canvas{position:absolute;inset:0;width:100%;height:100%}
+#fsBar{position:absolute;left:0;right:0;top:0;display:flex;gap:8px;align-items:center;justify-content:flex-end;padding:calc(env(safe-area-inset-top,0px) + 10px) max(12px,env(safe-area-inset-right,0px)) 10px max(12px,env(safe-area-inset-left,0px));background:linear-gradient(#000a,#0000)}#fsBar .note{margin-right:auto;color:#ddd}
+
+.lvl{position:relative;height:22px;border-radius:11px;background:var(--panel2);overflow:hidden;margin-top:8px}.lvl i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);width:0;transition:width .3s}.lvl b{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--ok) 35%,transparent);border-left:2px solid var(--ok);border-right:2px solid var(--ok)}
+.seqmini .bar{height:6px;margin:6px 0}.seqmini .row{gap:8px}.seqmini b{font-variant-numeric:tabular-nums}
+#setBody h3{margin-top:2px}.setrow{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}.setrow:last-child{border:0}.setrow>span{min-width:0}.setrow small{display:block}
+.setrow .inp{width:110px;text-align:right}.setrow .seg{min-width:200px}
+:root[data-big="1"] .btn{min-height:58px;font-size:17px}:root[data-big="1"] .seg button{min-height:54px}:root[data-big="1"] .stepper button{width:58px}:root[data-big="1"] .stepper input{height:58px}:root[data-big="1"] .step{min-height:68px}:root[data-big="1"] .iconbtn,:root[data-big="1"] .stopbtn{height:54px}
+@media (max-width:520px){.step{font-size:10px}.step i,.step svg{flex:none}}
+.step .sh{display:none}@media (max-width:640px){.step .lg{display:none}.step .sh{display:inline}}
+</style>
+
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <div id="brand">Astro</div>
+    <div class="grow"></div>
+    <button class="iconbtn" id="nightBtn" aria-label="Nachtmodus wechseln" title="Nachtmodus: normal, dunkel, rot"><i data-ic="moon"></i></button>
+    <button class="stopbtn" id="stopBtn">STOPP</button>
+    <div id="pills">
+      <button class="pill" data-go="verbinden" id="pMount"><span class="dot"></span>Montierung</button>
+      <button class="pill" data-go="verbinden" id="pCam"><span class="dot"></span>Hauptkamera</button>
+      <button class="pill" data-go="verbinden" id="pGcam"><span class="dot"></span>Leitkamera</button>
+      <button class="pill" data-go="verbinden" id="pTrack"><span class="dot"></span>Tracking</button>
+      <button class="pill" data-go="guiding" id="pGuide"><span class="dot"></span>Guiding <b class="num" id="pGuideVal">aus</b></button>
+    </div>
+  </header>
+
+  <button id="gdStrip" data-go="guiding" aria-label="Guiding-Anzeige, tippen für Details"><span class="gl">Guiding</span><b class="num" id="gsRms">–</b><span class="note num" id="gsRaDec"></span><canvas id="gsGraph"></canvas></button>
+  <main id="main">
+    <div id="screens">
+
+      <!-- 1 Verbinden -->
+      <section class="screen" data-s="verbinden"><div class="stack">
+        <div class="card">
+          <div class="row between"><h2>Aufbau</h2><button class="btn sm ghost" id="openSettings"><i data-ic="gear"></i>Einstellungen</button></div>
+          <div class="field" style="margin-top:10px"><span>Montierung und Leitrohr</span>
+            <select class="inp" id="profile"></select></div>
+          <p class="note" id="profileInfo" style="margin:10px 0 0"></p>
+        </div>
+        <div class="card" id="devMount"></div>
+        <div class="card" id="devCam"></div>
+        <div class="card" id="devGcam"></div>
+        <div class="row">
+          <button class="btn primary" style="flex:1" data-go="einnorden">Weiter: Einnorden</button>
+          <button class="btn ghost" style="flex:1" data-go="ziel">Überspringen, Montierung steht fest</button>
+        </div>
+      </div></section>
+
+      <!-- 2 Einnorden -->
+      <section class="screen" data-s="einnorden"><div class="stack">
+        <div class="card" id="alSetup">
+          <div class="row between"><h2>Einnorden</h2><span class="tag" id="alTag">bereit</span></div>
+          <p class="note" style="margin:6px 0 12px">Software-Polausrichtung ohne Blick zum Pol. Die Montierung dreht sich in RA, die Kamera misst die Achse, danach drehst du live an den Schrauben.</p>
+          <div class="seg" id="alMode"><button data-v="home" class="on">Zuhause: kleine Schritte</button><button data-v="field">Feld: große Schritte</button></div>
+          <div class="grid2" style="margin-top:12px">
+            <div class="field"><span>Schrittweite</span><div class="stepper"><button data-st="alRot" data-d="-1" aria-label="weniger">−</button><input id="alRot" inputmode="decimal" value="8"><small>°</small><button data-st="alRot" data-d="1" aria-label="mehr">+</button></div></div>
+            <div class="field"><span>Schritte</span><div class="stepper"><button data-st="alSteps" data-d="-1" aria-label="weniger">−</button><input id="alSteps" inputmode="numeric" value="3"><button data-st="alSteps" data-d="1" aria-label="mehr">+</button></div></div>
+            <div class="field"><span>Richtung</span><div class="seg" id="alDir"><button data-v="west" class="on">West</button><button data-v="east">Ost</button></div></div>
+            <div class="field"><span>Start</span><div class="seg" id="alStart"><button data-v="here" class="on">Von hier</button><button data-v="pos">Von Position</button></div></div>
+          </div>
+          <div class="grid2" id="alPosBox" style="margin-top:10px;display:none">
+            <div class="field"><span>RA (hh:mm:ss, J2000)</span><input class="inp" id="alRa" value="00:29:09"></div>
+            <div class="field"><span>Dec (±dd:mm:ss)</span><input class="inp" id="alDec" value="-00:17:23"></div>
+            <button class="btn sm ghost" id="alFromMap" style="grid-column:1/-1">Position aus Karte übernehmen</button>
+          </div>
+          <div class="three" style="margin-top:10px">
+            <div class="field"><span>Belichtung</span><div class="stepper"><button data-st="alExpo" data-d="-1" aria-label="kürzer">−</button><input id="alExpo" inputmode="decimal" value="4"><small>s</small><button data-st="alExpo" data-d="1" aria-label="länger">+</button></div></div>
+            <div class="field"><span>Gain</span><div class="stepper"><button data-st="alGain" data-d="-1" aria-label="weniger">−</button><input id="alGain" inputmode="numeric" value="200"><button data-st="alGain" data-d="1" aria-label="mehr">+</button></div></div>
+            <div class="field"><span>Binning</span><div class="seg" id="alBin"><button data-v="1" class="on">1×1</button><button data-v="2">2×2</button></div></div>
+          </div>
+          <div class="note" id="alSum" style="margin:12px 0"></div>
+          <div class="warnbox" id="alWarn" style="margin-bottom:12px;display:none"></div>
+          <div class="row"><button class="btn primary" style="flex:1" id="alGo">Messung starten</button><button class="btn ghost" style="flex:1" data-go="ziel">Überspringen</button></div>
+        </div>
+        <div class="card" id="alLive" style="display:none">
+          <h3>Gesamtfehler</h3><div class="big" id="alTotal">–</div>
+          <div class="note" id="alTotalNote">Start – Ziel unter 1′</div>
+          <div class="two" style="margin-top:12px">
+            <div class="card line"><h3>Azimut</h3><div class="mid" id="alAz">–</div><div id="alAzDir" class="note">&nbsp;</div></div>
+            <div class="card line"><h3>Höhe</h3><div class="mid" id="alAlt">–</div><div id="alAltDir" class="note">&nbsp;</div></div>
+          </div>
+          <canvas class="graph" id="alHist" style="margin-top:12px"></canvas>
+          <div class="log" id="alLog" style="margin-top:10px"></div>
+          <div class="row" style="margin-top:10px"><button class="btn danger" style="flex:1" id="alStop">Beenden</button></div>
+        </div>
+      </div></section>
+
+      <!-- 3 Ziel -->
+      <section class="screen map" data-s="ziel">
+        <div id="mapwrap">
+          <canvas id="map"></canvas>
+          <div id="q"><input id="search" type="search" placeholder="Objekt suchen (M 31, Pferdekopf, Vega)" autocomplete="off" aria-label="Objekt suchen">
+            <button class="fab sq" id="btnTips" aria-label="Gut sichtbare Objekte"><i data-ic="star"></i></button>
+            <button class="fab sq" id="btnLayers" aria-label="Kartenebenen"><i data-ic="layers"></i></button></div>
+          <div id="results"></div><div id="tips"></div><div id="layers"></div>
+          <div id="rotBar"><span>Bildwinkel</span><div class="stepper"><button data-st="mapRot" data-d="-1" aria-label="links drehen">−</button><input id="mapRot" value="0" inputmode="decimal"><small>°</small><button data-st="mapRot" data-d="1" aria-label="rechts drehen">+</button></div><button class="btn sm ghost" id="rotSolve" title="Drehung aus dem letzten Plate-Solve übernehmen">Aus Solve</button></div>
+          <button class="fab sq" id="btnMountPos" style="left:12px;bottom:12px" aria-label="Zur Blickrichtung der Montierung"><i data-ic="target"></i></button>
+        </div>
+        <div class="card" id="targetCard"></div>
+      </section>
+
+      <!-- 4 Fokus -->
+      <section class="screen" data-s="fokus"><div class="stack">
+        <div class="row between"><h2>Fokus</h2><span class="tag" id="fkTag">bereit</span></div>
+        <div class="viewer" id="fkView"><canvas></canvas><div class="cap" id="fkCap"></div><div class="busy"></div></div>
+        <div class="stats" id="fkStats"></div>
+        <div class="card"><h3>Sternbreite (HFD) im Verlauf</h3><canvas class="graph" id="fkHist"></canvas>
+          <p class="note" style="margin:8px 0 0" id="fkHint">Fortlaufend aufnehmen und am Fokussierer drehen, bis die Sternbreite am kleinsten ist.</p></div>
+        <div class="three">
+          <div class="field"><span>Belichtung</span><div class="stepper"><button data-st="imExpo" data-d="-1">−</button><input data-sync="imExpo" value="2"><small>s</small><button data-st="imExpo" data-d="1">+</button></div></div>
+          <div class="field"><span>Gain</span><div class="stepper"><button data-st="imGain" data-d="-1">−</button><input data-sync="imGain" value="100"><button data-st="imGain" data-d="1">+</button></div></div>
+          <div class="field"><span>Binning</span><div class="seg" data-segsync="imBin"><button data-v="1" class="on">1×1</button><button data-v="2">2×2</button></div></div>
+        </div>
+        <div class="row"><button class="btn primary" style="flex:2" data-live="fk">Fortlaufend</button><button class="btn" style="flex:1" data-once="fk">Einzelbild</button></div>
+        <button class="btn ghost block" disabled>Autofokus mit EAF (kommt zuletzt)</button>
+      </div></section>
+
+      <!-- 5 Bild -->
+      <section class="screen" data-s="bild"><div class="stack">
+        <div class="row between"><h2>Bild</h2><div class="row" style="gap:6px"><span class="tag" id="imTemp">Kamera</span><span class="tag" id="imSave">Speichern: an</span></div></div>
+        <div class="card" id="imSeq"></div>
+        <div class="seg" id="imMode"><button data-v="once" class="on">Einzelbild</button><button data-v="live">Fortlaufend</button><button data-v="series">Serie</button></div>
+        <div class="viewer" id="imView"><canvas></canvas><div class="cap" id="imCap"></div><div class="busy"></div></div>
+        <div class="stats" id="imStats"></div>
+        <div class="three">
+          <div class="field"><span>Belichtung</span><div class="stepper"><button data-st="imExpo" data-d="-1">−</button><input id="imExpo" data-sync="imExpo" value="2"><small>s</small><button data-st="imExpo" data-d="1">+</button></div></div>
+          <div class="field"><span>Gain</span><div class="stepper"><button data-st="imGain" data-d="-1">−</button><input id="imGain" data-sync="imGain" value="100"><button data-st="imGain" data-d="1">+</button></div></div>
+          <div class="field"><span>Binning</span><div class="seg" data-segsync="imBin"><button data-v="1" class="on">1×1</button><button data-v="2">2×2</button></div></div>
+        </div>
+        <div class="field"><span>Dehnung</span><div class="seg" id="imStretch"><button data-v="auto" class="on">Auto</button><button data-v="hart">Hart</button><button data-v="weich">Weich</button></div></div>
+        <button class="btn primary block" id="imGo">Aufnehmen</button>
+        <div class="card"><h3>Letzte Bilder</h3><div class="thumbs" id="imThumbs"><span class="note">Noch keine Bilder</span></div></div>
+      </div></section>
+
+      <!-- 6 Serie -->
+      <section class="screen" data-s="serie"><div class="stack">
+        <div class="card" id="sqHead"></div>
+        <div class="card"><div class="row between"><h3 style="margin:0">Ablauf</h3><button class="btn sm ghost" id="sqAdd">Satz hinzufügen</button></div><div id="sqList"></div></div>
+        <div class="row"><button class="btn primary" style="flex:2" id="sqGo">Serie starten</button><button class="btn" style="flex:1" id="sqPause" disabled>Pausieren</button></div>
+        <button class="btn block" data-go="flats"><i data-ic="sun"></i>Flat-Assistent</button>
+        <p class="note" id="sqNote"></p>
+      </div></section>
+
+      <!-- Guiding -->
+      <section class="screen" data-s="guiding"><div class="stack">
+        <div class="row between"><h2>Guiding</h2><span class="tag" id="gdTag">aus</span></div>
+        <div class="three">
+          <div class="card"><h3>RMS gesamt</h3><div class="mid" id="gdTot">–</div></div>
+          <div class="card"><h3>RA</h3><div class="mid" id="gdRa">–</div></div>
+          <div class="card"><h3>Dec</h3><div class="mid" id="gdDec">–</div></div>
+        </div>
+        <div class="card"><canvas class="graph" id="gdGraph" style="height:170px"></canvas>
+          <div class="row between" style="margin-top:8px"><span class="note"><b style="color:var(--accent)">━</b> RA &nbsp;<b style="color:var(--warn)">╌</b> Dec &nbsp; je Teilstrich 1″</span><span class="note num" id="gdStar">–</span></div></div>
+        <div class="grid2">
+          <div class="field"><span>Belichtung</span><div class="stepper"><button data-st="gdExpo" data-d="-1">−</button><input id="gdExpo" value="1.5"><small>s</small><button data-st="gdExpo" data-d="1">+</button></div></div>
+          <div class="field"><span>Gain</span><div class="stepper"><button data-st="gdGain" data-d="-1">−</button><input id="gdGain" value="100"><button data-st="gdGain" data-d="1">+</button></div></div>
+          <div class="field"><span>Aggressivität RA</span><div class="stepper"><button data-st="gdAggRa" data-d="-1">−</button><input id="gdAggRa" value="70"><small>%</small><button data-st="gdAggRa" data-d="1">+</button></div></div>
+          <div class="field"><span>Aggressivität Dec</span><div class="stepper"><button data-st="gdAggDec" data-d="-1">−</button><input id="gdAggDec" value="60"><small>%</small><button data-st="gdAggDec" data-d="1">+</button></div></div>
+        </div>
+        <div class="field"><span>Dec-Richtung</span><div class="seg" id="gdDecMode"><button data-v="both" class="on">Beide</button><button data-v="north">Nur Nord</button><button data-v="south">Nur Süd</button><button data-v="off">Aus</button></div></div>
+        <label class="chk card" style="padding:10px 16px"><input type="checkbox" id="gdMulti" checked><span>Multi-Star (mehrere Sterne mitteln)<br><small id="gdMultiNote"></small></span></label>
+        <div class="row"><button class="btn primary" style="flex:2" id="gdGo">Kalibrieren und guiden</button><button class="btn" style="flex:1" id="gdStop">Stopp</button></div>
+        <div class="log" id="gdLog"></div>
+      </div></section>
+
+      <!-- Flats -->
+      <section class="screen" data-s="flats"><div class="stack">
+        <div class="row between"><h2>Flat-Assistent</h2><span class="tag" id="flTag">bereit</span></div>
+        <div class="card"><h3>1 · Lichtquelle</h3>
+          <div class="seg" id="flSrc"><button data-v="panel" class="on">Flatpanel</button><button data-v="sky">Dämmerhimmel</button><button data-v="cloth">Tuch</button></div>
+          <p class="note" id="flSrcNote" style="margin:8px 0 0"></p></div>
+        <div class="card"><h3>2 · Ziel</h3><div class="grid2">
+          <div class="field"><span>Anzahl Flats</span><div class="stepper"><button data-st="flCount" data-d="-1">−</button><input id="flCount" value="30" inputmode="numeric"><button data-st="flCount" data-d="1">+</button></div></div>
+          <div class="field"><span>Zielhelligkeit</span><div class="stepper"><button data-st="flTarget" data-d="-1">−</button><input id="flTarget" value="50" inputmode="numeric"><small>%</small><button data-st="flTarget" data-d="1">+</button></div></div>
+          <div class="field"><span>Gain</span><div class="stepper"><button data-st="flGain" data-d="-1">−</button><input id="flGain" value="100" inputmode="numeric"><button data-st="flGain" data-d="1">+</button></div></div>
+          <div class="field"><span>Binning</span><div class="seg" id="flBin"><button data-v="1" class="on">1×1</button><button data-v="2">2×2</button></div></div></div>
+          <label class="chk"><input type="checkbox" id="flDark" checked><span>Danach Dark-Flats (gleiche Belichtung, Teleskop abgedeckt)</span></label></div>
+        <div class="viewer" id="flView"><canvas></canvas><div class="cap" id="flCap"></div><div class="busy"></div></div>
+        <div class="card"><div class="row between"><h3 style="margin:0">Helligkeit</h3><span class="num" id="flLevel">–</span></div>
+          <div class="lvl" id="flBar"><i id="flFill"></i><b id="flBand"></b></div>
+          <div class="row between note" style="margin-top:6px"><span id="flExpo">Belichtung –</span><span id="flStep">–</span></div>
+          <div class="bar" style="margin-top:10px"><i id="flProg" style="width:0"></i></div></div>
+        <div class="row"><button class="btn primary" style="flex:2" id="flGo">Flats erstellen</button><button class="btn danger" style="flex:1" id="flStop" disabled>Stopp</button></div>
+        <div class="log" id="flLog"></div>
+        <div class="card" id="flDone" style="display:none"></div>
+      </div></section>
+
+      <!-- Einstellungen -->
+      <section class="screen" data-s="einstellungen"><div class="stack" id="setBody"></div></section>
+    </div>
+
+    <aside id="side">
+      <div class="card"><div class="row between"><h3 style="margin:0">Live-Bild</h3><span class="note num" id="sdCap"></span></div>
+        <div class="viewer" id="sdView" style="margin-top:8px"><canvas></canvas><div class="busy"></div></div>
+        <div class="stats" id="sdStats" style="margin-top:8px;grid-template-columns:repeat(2,1fr)"></div>
+        <div class="row" style="margin-top:10px"><button class="btn primary sm" style="flex:1" data-live="sd">Fortlaufend</button><button class="btn sm" style="flex:1" data-once="sd">Einzelbild</button></div></div>
+      <div class="card" id="sdSeq"></div>
+      <div class="card"><div class="row between"><h3 style="margin:0">Guiding</h3><span class="mid num" id="sdRms" style="font-size:18px">–</span></div>
+        <canvas class="graph" id="sdGraph" style="margin-top:8px;height:110px"></canvas></div>
+      <div class="card"><h3>Protokoll</h3><div class="log" id="sdLog"></div></div>
+    </aside>
+  </main>
+
+  <nav id="steps" aria-label="Ablauf">
+    <button class="step" data-go="verbinden"><i data-ic="link"></i>Verbinden</button>
+    <button class="step" data-go="einnorden"><i data-ic="polar"></i>Einnorden</button>
+    <button class="step" data-go="ziel"><i data-ic="star"></i>Ziel</button>
+    <button class="step" data-go="guiding"><i data-ic="guide"></i>Guiding</button>
+    <button class="step" data-go="fokus"><i data-ic="focus"></i>Fokus</button>
+    <button class="step" data-go="bild"><i data-ic="image"></i>Bild</button>
+    <button class="step" data-go="serie"><i data-ic="camera"></i>Serie</button>
+    <button class="step" data-go="einstellungen"><i data-ic="gear"></i><span class="lg">Einstellungen</span><span class="sh">Optionen</span></button>
+  </nav>
+</div>
+<div id="fs" role="dialog" aria-modal="true" aria-label="Bild vergrößert"><canvas></canvas><div id="fsBar"><span class="note" id="fsInfo"></span><button class="btn sm" id="fsReset">Einpassen</button><button class="btn sm" id="fsClose">Schließen</button></div></div>
+<div id="sheet" role="dialog" aria-modal="true" aria-label="Einstellungen"><div class="box" id="sheetBox"></div></div>
+<div class="demo" id="demoBadge" hidden>DEMO: simulierte Geräte</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const $$ = (sel, el) => [...(el || document).querySelectorAll(sel)];
+const D2R = Math.PI / 180, R2D = 180 / Math.PI;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("astro." + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem("astro." + k, JSON.stringify(v)); } catch (e) {} }
+};
+
+// ---------- App-Einstellungen
+const SET_DEF = { siteManual: false, lat: 49.7167, lon: 6.75, minAlt: 10, confirm: true, big: false, wake: false, mainPixel: 4.63, mainFocal: 480, camW: 2712, camH: 1538, defExpo: 2, defGain: 100, saturation: 65535 };
+const SET = Object.assign({}, SET_DEF, store.get("set", {}));
+const saveSet = () => store.set("set", SET);
+
+// ---------- Symbole
+const ICONS = {
+  moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+  sliders:'<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h0a1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  star: '<path d="M12 3l2.6 5.6 6 .7-4.4 4.1 1.2 6L12 16.5 6.6 19.4l1.2-6L3.4 9.3l6-.7z"/>',
+  layers: '<path d="M12 3l9 5-9 5-9-5zM3 13l9 5 9-5"/>',
+  target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  polar: '<circle cx="12" cy="12" r="8"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>',
+  focus: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/>',
+  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>',
+  guide:'<path d="M3 12h4l2-6 4 12 2-6h6"/>',
+  camera: '<rect x="4" y="6" width="16" height="12" rx="2"/><path d="M9 6l1.5-2h3L15 6"/>'
+};
+function paintIcons(root) {
+  $$("i[data-ic]", root).forEach(el => {
+    const p = ICONS[el.dataset.ic]; if (!p) return;
+    el.outerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+  });
+}
+
+// ---------- Formate
+const fmtRA = deg => { const h = ((deg % 360) + 360) % 360 / 15, hh = Math.floor(h), m = (h - hh) * 60; return hh + "h " + m.toFixed(1) + "m"; };
+const fmtDec = d => { const s = d < 0 ? "−" : "+", a = Math.abs(d), dd = Math.floor(a), m = (a - dd) * 60; return s + dd + "° " + m.toFixed(0) + "′"; };
+const fmtArc = v => v == null || isNaN(v) ? "–" : (v < 10 ? v.toFixed(1) : v.toFixed(0)).replace(".", ",") + "″";
+const fmt1 = v => (Math.abs(v) < 100 ? Math.abs(v).toFixed(1) : Math.abs(v).toFixed(0)).replace(".", ",") + "′";
+const fmtNum = (v, d) => v == null || isNaN(v) ? "–" : Number(v).toFixed(d == null ? 0 : d).replace(".", ",");
+function fmtDur(s) { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? h + " h " + String(m).padStart(2, "0") + " min" : m + " min " + String(s % 60).padStart(2, "0") + " s"; }
+function parseRA(t) { t = String(t).trim().replace(",", "."); if (/[:hH ]/.test(t)) { const p = t.replace(/[hHmMsS]/g, " ").split(/[: ]+/).filter(Boolean).map(Number); return ((p[0] || 0) + (p[1] || 0) / 60 + (p[2] || 0) / 3600) * 15; } return parseFloat(t); }
+function parseDec(t) { t = String(t).trim().replace(",", ".").replace("−", "-"); const neg = t.startsWith("-"); if (/[:° ]/.test(t)) { const p = t.replace(/[-+°′″'"dDmMsS]/g, " ").split(/[: ]+/).filter(Boolean).map(Number); const v = (p[0] || 0) + (p[1] || 0) / 60 + (p[2] || 0) / 3600; return neg ? -v : v; } return parseFloat(t); }
+const hms = deg => { const h = deg / 15, hh = Math.floor(h), mm = Math.floor((h - hh) * 60), ss = Math.round(((h - hh) * 60 - mm) * 60); return [hh, mm, ss].map(x => String(x).padStart(2, "0")).join(":"); };
+const dms = d => { const s = d < 0 ? "-" : "+", a = Math.abs(d), dd = Math.floor(a), mm = Math.floor((a - dd) * 60), ss = Math.round(((a - dd) * 60 - mm) * 60); return s + [dd, mm, ss].map(x => String(x).padStart(2, "0")).join(":"); };
+
+// ---------- Aufbauten (Montierung + Leitrohr), Werte aus den PHD2-Profilen
+const PROFILES = {
+  hd: { id: "hd", name: "Umi17 · HD", sub: "OnStep 4.21e · Leitkamera SV305 Pro am Leitrohr 305 mm",
+    mount: { host: "192.168.0.1", port: 9999, tracking: "sidereal" },
+    guide: { pixel: 2.9, focal: 305, speed: 1.01, gain: 100, expo: 1.5, autoMin: 1, autoMax: 5, snr: 6, multi: true, multiMax: 10, search: 15, hfdMin: 1.5, hfdMax: 10, sizeDetect: true, sizeTol: 50,
+      raAlgo: "Predictive PEC", aggRa: 70, raPredW: 70, raReactW: 80, raMin: 0.23, raMax: 1000, raPeriod: 420.48, raRetain: 75,
+      decAlgo: "Lowpass2", aggDec: 60, decMin: 0.23, decMax: 900, decMode: "both", backlash: false, backlashMs: 20,
+      calStep: 550, calSteps: 8, calDist: 25, decComp: true, flipDec: true, ditherMode: "Spirale", ditherScale: 1.0 } },
+  eq5: { id: "eq5", name: "A · EQ5", sub: "OnStep · Leitkamera 3,75 µm am Leitrohr 234 mm",
+    mount: { host: "192.168.0.1", port: 9999, tracking: "sidereal" },
+    guide: { pixel: 3.75, focal: 234, speed: 0.5, gain: 100, expo: 2, autoMin: 1, autoMax: 5, snr: 6, multi: true, multiMax: 10, search: 15, hfdMin: 1.5, hfdMax: 10, sizeDetect: false, sizeTol: 53,
+      raAlgo: "Predictive PEC", aggRa: 80, raPredW: 80, raReactW: 80, raMin: 0.20, raMax: 2500, raPeriod: 599.19, raRetain: 40,
+      decAlgo: "Lowpass2", aggDec: 80, decMin: 0.20, decMax: 2500, decMode: "both", backlash: true, backlashMs: 20,
+      calStep: 950, calSteps: 12, calDist: 25, decComp: true, flipDec: true, ditherMode: "Spirale", ditherScale: 1.0 } }
+};
+const SETTING_GROUPS = [
+  ["Leitkamera und Optik", [["pixel", "Pixelgröße", "µm", 0.01], ["focal", "Brennweite Leitrohr", "mm", 1], ["speed", "Guide-Geschwindigkeit", "× siderisch", 0.01], ["expo", "Belichtung", "s", 0.5], ["gain", "Gain", "", 5]]],
+  ["Leitsterne", [["multiMax", "Anzahl Sterne (Multi-Star)", "", 1], ["search", "Suchbereich", "px", 1], ["hfdMin", "Mindest-HFD", "px", 0.1], ["hfdMax", "Höchst-HFD", "px", 0.5], ["snr", "Mindest-SNR", "", 1]]],
+  ["Rektaszension", [["aggRa", "Aggressivität (Regler)", "%", 5], ["raPredW", "Vorhersage-Gewichtung", "%", 5], ["raReactW", "Reaktive Gewichtung", "%", 5], ["raMin", "Minimale Bewegung", "px", 0.01], ["raMax", "Maximale Pulsdauer", "ms", 50], ["raPeriod", "Periodendauer (PEC)", "s", 0.01], ["raRetain", "Modell behalten", "%", 5]]],
+  ["Deklination", [["aggDec", "Aggressivität (Lowpass2)", "%", 5], ["decMin", "Minimale Bewegung", "px", 0.01], ["decMax", "Maximale Pulsdauer", "ms", 50], ["backlashMs", "Backlash-Ausgleich", "ms", 5]]],
+  ["Kalibrierung", [["calStep", "Kalibrierschritt", "ms", 50], ["calSteps", "Schritte", "", 1], ["calDist", "Distanz", "px", 1]]]
+];
+let PROF = JSON.parse(JSON.stringify(PROFILES));
+(function () { const saved = store.get("profiles", null); if (saved) for (const k in saved) if (PROF[k]) { Object.assign(PROF[k].guide, saved[k].guide || {}); } })();
+const profile = () => PROF[S.profileId] || PROF.hd;
+const guideScale = () => 206.265 * profile().guide.pixel / profile().guide.focal;
+const MAIN_CAM = { pixel: 4.63, focal: 480 };       // SV405CC an SV550
+let FOV_W = 2.29, FOV_H = 1.56;
+let FRAME_ROT = store.get("rot", 0);
+
+// ---------- Zustand
+const S = {
+  demo: false, night: store.get("night", "normal"), screen: store.get("screen", "verbinden"), profileId: store.get("profile", "hd"),
+  status: null, align: null, guide: null, job: null, sel: null, goalDone: false, alignDone: false, skipped: false,
+  img: { mode: "once", live: false, busy: false, stretch: "auto", list: [], last: null, hist: [] },
+  seq: { running: false, paused: false, startedAt: 0, plan: store.get("plan", null) },
+  gdSamples: []
+};
+
+// ---------- Astronomie (J2000 -> Horizont)
+let site = { lat: 49.7167, lon: 6.75 }, nowOffsetMs = 0;
+function jdNow() { return (Date.now() + nowOffsetMs) / 86400000 + 2440587.5; }
+function gmstDeg(jd) { const d = jd - 2451545.0, t = d / 36525; return ((280.46061837 + 360.98564736629 * d + 0.000387933 * t * t - t * t * t / 38710000) % 360 + 360) % 360; }
+function precessionMatrix(jd) {
+  const t = (jd - 2451545.0) / 36525, as = Math.PI / (180 * 3600);
+  const zeta = (2306.2181 * t + 0.30188 * t * t + 0.017998 * t * t * t) * as, z = (2306.2181 * t + 1.09468 * t * t + 0.018203 * t * t * t) * as, th = (2004.3109 * t - 0.42665 * t * t - 0.041833 * t * t * t) * as;
+  const cz = Math.cos(zeta), sz = Math.sin(zeta), cZ = Math.cos(z), sZ = Math.sin(z), ct = Math.cos(th), st = Math.sin(th);
+  return [[cZ * ct * cz - sZ * sz, -cZ * ct * sz - sZ * cz, -cZ * st], [sZ * ct * cz + cZ * sz, -sZ * ct * sz + cZ * cz, -sZ * st], [st * cz, -st * sz, ct]];
+}
+function makeFrame() { const jd = jdNow(); return { jd, P: precessionMatrix(jd), lst: (gmstDeg(jd) + site.lon + 720) % 360, sl: Math.sin(site.lat * D2R), cl: Math.cos(site.lat * D2R) }; }
+let F = makeFrame();
+function altaz(ra, dec) {
+  const cd = Math.cos(dec * D2R), v = [cd * Math.cos(ra * D2R), cd * Math.sin(ra * D2R), Math.sin(dec * D2R)], P = F.P;
+  const x = P[0][0] * v[0] + P[0][1] * v[1] + P[0][2] * v[2], y = P[1][0] * v[0] + P[1][1] * v[1] + P[1][2] * v[2], zz = P[2][0] * v[0] + P[2][1] * v[1] + P[2][2] * v[2];
+  const ra2 = Math.atan2(y, x) * R2D, dec2 = Math.asin(clamp(zz, -1, 1)), h = (F.lst - ra2) * D2R, sd = Math.sin(dec2), cdd = Math.cos(dec2);
+  const east = -cdd * Math.sin(h), north = sd * F.cl - cdd * Math.cos(h) * F.sl, up = sd * F.sl + cdd * Math.cos(h) * F.cl;
+  return [((Math.atan2(east, north) * R2D) + 360) % 360, Math.asin(clamp(up, -1, 1)) * R2D];
+}
+function hoursToTransit(ra) { const d = ((ra - F.lst + 540) % 360 - 180) / 15; return d; }   // >0: noch vor dem Meridian
+
+// ---------- Schnittstelle: echtes Programm oder Demo
+async function api(path) {
+  if (S.demo) return demoApi(path);
+  const r = await fetch(path, { cache: "no-store" });
+  return r.json();
+}
+const qs = o => Object.entries(o).filter(([, v]) => v != null && v !== "").map(([k, v]) => k + "=" + encodeURIComponent(v)).join("&");
+
+// ---------- Rückfrage im eigenen Dialog (confirm() gibt es im Artifact nicht)
+function ask(title, text, ok, danger, force) {
+  if (!SET.confirm && !force) return Promise.resolve(true);
+  return new Promise(res => {
+    const box = $("sheetBox");
+    box.innerHTML = `<h2>${title}</h2><p class="note" style="margin:8px 0 16px;white-space:pre-line">${text}</p><div class="row"><button class="btn ${danger ? "danger" : "primary"}" style="flex:1" id="askOk">${ok || "OK"}</button><button class="btn ghost" style="flex:1" id="askNo">Abbrechen</button></div>`;
+    $("sheet").classList.add("on");
+    const done = v => { $("sheet").classList.remove("on"); res(v); };
+    $("askOk").onclick = () => done(true); $("askNo").onclick = () => done(false);
+    $("sheet").onclick = e => { if (e.target === $("sheet")) done(false); };
+  });
+}
+function toast(t) { $("sdLog") && logAdd(t); }
+const LOG = [];
+function logAdd(t) { LOG.push(new Date().toLocaleTimeString("de-DE") + " " + t); while (LOG.length > 40) LOG.shift(); const el = $("sdLog"); if (el) { el.textContent = LOG.slice(-8).join("\n"); el.scrollTop = el.scrollHeight; } }
+
+// ---------- Nachtmodus
+const NIGHTS = ["normal", "dunkel", "rot"], NIGHT_NAME = { normal: "Normal", dunkel: "Dunkel", rot: "Rot" };
+function applyNight() {
+  document.documentElement.dataset.night = S.night;
+  const b = $("nightBtn"); b.title = "Nachtmodus: " + NIGHT_NAME[S.night] + " (tippen zum Wechseln)"; b.setAttribute("aria-label", "Nachtmodus " + NIGHT_NAME[S.night] + ", tippen zum Wechseln");
+  readColors(); scheduleDraw(); redrawGraphs();
+}
+const C = {};
+function readColors() { const cs = getComputedStyle(document.documentElement); ["sky", "map-grid", "map-line", "map-name", "map-meridian", "map-ground", "map-horizon", "map-star", "map-dso", "map-mount", "map-target", "map-label", "dim", "accent", "warn", "line"].forEach(k => C[k] = cs.getPropertyValue("--" + k).trim()); }
+
+// ---------- Eingebauter kleiner Himmel (nur für die Demo / Notfall; echt kommt /sky.json)
+const DEMO_SKY = (function () {
+  const st = (s) => s.split("|").map(r => { const p = r.split(","); return [+p[0], +p[1], +p[2], p[3] || ""]; });
+  const stars = st("101.287,-16.716,-1.46,Sirius|213.915,19.182,-0.05,Arktur|279.235,38.784,0.03,Wega|79.172,45.998,0.08,Capella|78.634,-8.202,0.13,Rigel|114.825,5.225,0.34,Prokyon|88.793,7.407,0.5,Beteigeuze|297.696,8.868,0.77,Atair|68.98,16.509,0.85,Aldebaran|247.352,-26.432,1.06,Antares|201.298,-11.161,0.98,Spica|116.329,28.026,1.14,Pollux|344.413,-29.622,1.16,Fomalhaut|310.358,45.28,1.25,Deneb|152.093,11.967,1.35,Regulus|113.65,31.888,1.58,Kastor|81.283,6.35,1.64,Bellatrix|81.573,28.608,1.65,Elnath|84.053,-1.202,1.69,Alnilam|85.19,-1.943,1.77,Alnitak|83.002,-0.299,2.23,Mintaka|86.939,-9.67,2.07,Saiph|37.955,89.264,1.98,Polarstern|165.932,61.751,1.79,Dubhe|165.46,56.382,2.37,Merak|178.457,53.695,2.44,Phekda|183.857,57.033,3.31,Megrez|193.507,55.96,1.77,Alioth|200.981,54.925,2.27,Mizar|206.885,49.313,1.86,Alkaid|10.127,56.537,2.24,Schedir|2.295,59.15,2.27,Caph|14.177,60.717,2.47,Gamma Cas|21.454,60.235,2.68,Ruchbah|28.599,63.67,3.37,Segin|51.081,49.861,1.79,Mirfak|47.042,40.956,2.1,Algol|2.097,29.09,2.06,Alpheratz|17.433,35.621,2.05,Mirach|30.975,42.33,2.26,Almach|346.19,15.205,2.49,Markab|345.944,28.083,2.42,Scheat|3.309,15.184,2.83,Algenib|326.046,9.875,2.39,Enif|305.557,40.257,2.23,Sadr|311.553,33.97,2.46,Gienah|292.68,27.96,3.08,Albireo|296.244,45.131,2.87,Delta Cyg|282.52,33.363,3.52,Sheliak|284.736,32.69,3.25,Sulafat|281.193,37.605,4.3,Zeta Lyr|269.151,51.489,2.23,Eltanin|263.734,12.56,2.08,Rasalhague|247.555,21.49,2.8,Kornephoros|233.672,26.715,2.23,Alphecca|177.265,14.572,2.14,Denebola|154.993,19.842,2.28,Algieba|99.428,16.399,1.9,Alhena|100.983,25.131,3.06,Mebsuta|95.74,22.514,2.88,Tejat|84.411,21.143,3.0,Zeta Tau|56.871,24.105,2.87,Alkyone|45.57,4.09,2.53,Menkar|31.793,23.462,2.0,Hamal|28.66,20.808,2.64,Sheratan|95.675,-17.956,1.98,Mirzam|83.183,-17.822,2.58,Arneb|83.784,9.934,3.5,Meissa|222.676,74.156,2.08,Kochab");
+  const L = (...a) => a.map(p => [p[0], p[1]]);
+  const cons = {
+    Ori: ["Orion", 84, 2, [L([88.793, 7.407], [83.784, 9.934], [81.283, 6.35], [83.002, -0.299], [84.053, -1.202], [85.19, -1.943], [88.793, 7.407]), L([85.19, -1.943], [86.939, -9.67], [78.634, -8.202], [83.002, -0.299])]],
+    Cas: ["Kassiopeia", 10, 60, [L([2.295, 59.15], [10.127, 56.537], [14.177, 60.717], [21.454, 60.235], [28.599, 63.67])]],
+    UMa: ["Großer Bär", 170, 58, [L([165.932, 61.751], [165.46, 56.382], [178.457, 53.695], [183.857, 57.033], [165.932, 61.751]), L([183.857, 57.033], [193.507, 55.96], [200.981, 54.925], [206.885, 49.313])]],
+    Cyg: ["Schwan", 305, 40, [L([310.358, 45.28], [305.557, 40.257], [292.68, 27.96]), L([296.244, 45.131], [305.557, 40.257], [311.553, 33.97])]],
+    Lyr: ["Leier", 283, 36, [L([279.235, 38.784], [281.193, 37.605], [282.52, 33.363], [284.736, 32.69], [281.193, 37.605])]],
+    Peg: ["Pegasus", 345, 20, [L([2.097, 29.09], [345.944, 28.083], [346.19, 15.205], [3.309, 15.184], [2.097, 29.09])]],
+    And: ["Andromeda", 14, 38, [L([2.097, 29.09], [17.433, 35.621], [30.975, 42.33])]],
+    Tau: ["Stier", 66, 19, [L([81.573, 28.608], [68.98, 16.509], [84.411, 21.143])]],
+    Gem: ["Zwillinge", 107, 26, [L([113.65, 31.888], [116.329, 28.026], [99.428, 16.399]), L([113.65, 31.888], [100.983, 25.131], [95.74, 22.514])]],
+    Per: ["Perseus", 50, 46, [L([51.081, 49.861], [47.042, 40.956]), L([79.172, 45.998], [81.573, 28.608])]]
+  };
+  const d = (n, t, ra, dec, mag, size, pa, common, m) => [n, t, ra, dec, mag, size, null, pa || 0, common || "", m || 0];
+  const dsos = [d("M 31", "G", 10.685, 41.269, 3.4, 190, 35, "Andromedagalaxie", 31), d("M 42", "Neb", 83.822, -5.391, 4, 65, 0, "Orionnebel", 42), d("M 45", "OCl", 56.75, 24.117, 1.6, 110, 0, "Plejaden", 45), d("M 13", "GCl", 250.423, 36.46, 5.8, 20, 0, "Herkuleshaufen", 13), d("M 27", "PN", 299.901, 22.721, 7.5, 8, 0, "Hantelnebel", 27), d("M 57", "PN", 283.396, 33.029, 8.8, 1.4, 0, "Ringnebel", 57), d("M 81", "G", 148.888, 69.065, 6.9, 27, 157, "Bodes Galaxie", 81), d("M 82", "G", 148.968, 69.68, 8.4, 11, 65, "Zigarrengalaxie", 82), d("M 51", "G", 202.47, 47.195, 8.4, 11, 0, "Whirlpool", 51), d("M 101", "G", 210.802, 54.349, 7.9, 29, 0, "Feuerradgalaxie", 101), d("M 33", "G", 23.462, 30.66, 5.7, 70, 23, "Dreiecksgalaxie", 33), d("M 1", "Neb", 83.633, 22.015, 8.4, 6, 0, "Krebsnebel", 1), d("M 44", "OCl", 130.1, 19.67, 3.1, 95, 0, "Krippe", 44), d("M 35", "OCl", 92.25, 24.33, 5.3, 28, 0, "", 35), d("M 37", "OCl", 88.074, 32.553, 6.2, 24, 0, "", 37), d("M 3", "GCl", 205.548, 28.377, 6.2, 18, 0, "", 3), d("M 92", "GCl", 259.281, 43.136, 6.4, 14, 0, "", 92), d("M 4", "GCl", 245.897, -26.526, 5.6, 26, 0, "", 4), d("M 8", "Neb", 270.904, -24.38, 6, 90, 0, "Lagunennebel", 8), d("M 17", "Neb", 275.2, -16.18, 6, 11, 0, "Omeganebel", 17), d("M 20", "Neb", 270.6, -23.03, 6.3, 28, 0, "Trifidnebel", 20), d("M 16", "Neb", 274.7, -13.8, 6, 35, 0, "Adlernebel", 16), d("M 11", "OCl", 282.77, -6.27, 6.3, 14, 0, "Wildentenhaufen", 11), d("M 15", "GCl", 322.493, 12.167, 6.2, 18, 0, "", 15), d("M 2", "GCl", 323.363, -0.823, 6.5, 16, 0, "", 2), d("M 39", "OCl", 322.9, 48.43, 4.6, 32, 0, "", 39), d("M 52", "OCl", 351.2, 61.59, 6.9, 13, 0, "", 52), d("NGC 7000", "Neb", 314.7, 44.37, 4, 120, 0, "Nordamerikanebel"), d("IC 434", "Neb", 85.25, -2.46, 7.3, 60, 0, "Pferdekopfnebel"), d("NGC 2024", "Neb", 85.43, -1.9, 7, 30, 0, "Flammennebel"), d("NGC 1499", "Neb", 60.13, 36.42, 5, 160, 0, "Kalifornianebel"), d("NGC 869", "OCl", 35.0, 57.13, 3.7, 60, 0, "Doppelhaufen h und Chi"), d("NGC 891", "G", 35.639, 42.349, 10, 13, 22, ""), d("NGC 6992", "Neb", 313.2, 31.7, 7, 60, 0, "Cirrusnebel"), d("NGC 2244", "OCl", 97.98, 4.95, 4.8, 80, 0, "Rosettennebel"), d("NGC 281", "Neb", 13.2, 56.6, 7.4, 35, 0, "Pacman"), d("IC 1805", "Neb", 38.2, 61.45, 6.5, 60, 0, "Herznebel"), d("IC 1848", "Neb", 41.5, 60.4, 6.5, 60, 0, "Seelennebel"), d("NGC 7293", "PN", 337.41, -20.84, 7.6, 13, 0, "Helixnebel")];
+  return { stars, cons, dsos, types: { G: "Galaxie", Neb: "Nebel", OCl: "Offener Sternhaufen", GCl: "Kugelsternhaufen", PN: "Planetarischer Nebel" }, builtin: true };
+})();
+
+// ---------- Simulierte Geräte (Demo). Spiegelt die Schnittstelle des echten Programms.
+const DM = {
+  ra: 85.25, dec: -2.46, tracking: true, slewing: false, t0: Date.now(), job: { running: false, name: null, log: [], result: null, error: null },
+  align: { phase: "idle", log: [], result: null, live: null, history: [], error: null }, alignTimer: null,
+  guide: { phase: "idle", log: [], samples: [], rms: null, star: null, timer: null, t0: 0, drift: [0, 0], cfg: {} },
+  focus: 0.0, shot: 0, frames: {}
+};
+function demoLog(o, m) { o.log.push(new Date().toLocaleTimeString("de-DE") + " " + m); if (o.log.length > 30) o.log.shift(); }
+function rnd() { return (Math.random() + Math.random() + Math.random() - 1.5) / 1.5; }
+function demoStatus() {
+  const sc = (DM.guide.phase === "guiding");
+  return { lat: site.lat, lon: site.lon, time: new Date().toISOString(), epoch: "jnow", job: Object.assign({}, DM.job, { log: DM.job.log.slice(-12) }), align_phase: DM.align.phase,
+    mount: { ra: DM.ra, dec: DM.dec, tracking: DM.tracking, slewing: DM.slewing, parked: false },
+    devices: { mount: { ok: true, name: "OnStep 4.21e", host: "192.168.0.1:9999" }, main: { ok: true, name: "SVBony SV405CC", w: 2712, h: 1538, temp: -4.8 }, guide: { ok: true, name: "SVBony SV305 Pro", w: 1936, h: 1096, temp: 8.1 } },
+    guiding: sc, solve: { rot: 12.4, scale: 1.98, ra: DM.ra, dec: DM.dec } };
+}
+function demoSlew(ra, dec, name) {
+  if (DM.job.running) return { ok: false, error: "Es läuft schon eine Fahrt oder Messung" };
+  DM.job = { running: true, name, log: [], result: null, error: null }; DM.slewing = true;
+  const j = DM.job, a0 = [DM.ra, DM.dec];
+  demoLog(j, "Ziel steht " + altaz(ra, dec)[1].toFixed(0) + " Grad hoch"); demoLog(j, "Fahrt 1 gestartet");
+  let k = 0;
+  const iv = setInterval(() => {
+    k++; const f = Math.min(1, k / 12), e = f * f * (3 - 2 * f);
+    DM.ra = a0[0] + ((ra - a0[0] + 540) % 360 - 180) * e; DM.dec = a0[1] + (dec - a0[1]) * e;
+    if (k === 12) { DM.slewing = false; demoLog(j, "Aufnahme und Plate-Solving ..."); }
+    if (k === 16) { demoLog(j, "Abweichung 412 Bogensekunden, korrigiere"); }
+    if (k === 22) { DM.ra = ra; DM.dec = dec; demoLog(j, "FERTIG, Abweichung 18 Bogensekunden"); j.result = { ok: true, iterations: 2, error_arcsec: 18 }; j.running = false; clearInterval(iv); }
+  }, 450);
+  return { ok: true };
+}
+function demoAlignStart(q) {
+  const A = DM.align; if (DM.job.running || ["starting", "measuring", "live"].includes(A.phase)) return { ok: false, error: "Es läuft schon eine Fahrt oder Messung" };
+  Object.assign(A, { phase: "measuring", log: [], result: null, live: null, history: [], error: null });
+  const n = Math.max(2, parseInt(q.steps) || 3), rot = parseFloat(q.rot) || 8;
+  demoLog(A, "Messung: " + n + " Aufnahmen im Abstand von " + rot + "°, Nachführung aus"); DM.tracking = false;
+  let k = 0, tot = 41 + Math.random() * 20;
+  const iv = setInterval(() => {
+    k++;
+    if (k <= n) { demoLog(A, "Aufnahme " + k + " von " + n + ": gelöst, " + (330 + k * 7) + " Sterne"); return; }
+    if (k === n + 1) { A.result = { total: tot, alt: tot * 0.7, east: tot * 0.7, lines: ["Polachse 41′ vom Pol entfernt"], span: n * rot, rms: 4.2, n, radius: 60, warnings: [] }; A.history.push(tot); A.phase = "live"; demoLog(A, "Messung fertig: Polabstand " + tot.toFixed(1).replace(".", ",") + " Bogenminuten. Jetzt an den Schrauben drehen."); return; }
+    tot = Math.max(0.4, tot * (0.86 + Math.random() * 0.06) - 0.4); const alt = tot * 0.6 * (Math.random() > 0.5 ? 1 : -1), az = Math.sqrt(Math.max(0, tot * tot - alt * alt)) * (Math.random() > 0.5 ? 1 : -1);
+    A.live = { total: tot, alt, east: az, moved_az: 0, moved_alt: 0, lines: [], warnings: [] }; A.history.push(tot);
+    if (tot < 1 && k > n + 8) { A.phase = "done"; demoLog(A, "FERTIG: Polabstand " + tot.toFixed(1) + " Bogenminuten"); demoLog(A, "Nachführung wieder so wie vorher"); DM.tracking = true; clearInterval(iv); }
+  }, 1100);
+  DM.alignTimer = iv; return { ok: true, warning: null };
+}
+function demoStop() {
+  clearInterval(DM.alignTimer); if (["measuring", "live", "starting"].includes(DM.align.phase)) { DM.align.phase = "stopped"; DM.tracking = true; demoLog(DM.align, "Abgebrochen. Nachführung wieder so wie vorher"); }
+  DM.job.running = false; DM.slewing = false; clearInterval(DM.guide.timer);
+  if (DM.guide.phase !== "idle") { DM.guide.phase = "idle"; demoLog(DM.guide, "Guiding gestoppt"); }
+  return { ok: true };
+}
+function demoShoot(q) {
+  const cam = q.cam === "guide" ? "guide" : "main", expo = parseFloat(q.expo) || 2, gain = parseFloat(q.gain) || 100, bin = parseInt(q.bin) || 1;
+  const t = (Date.now() - DM.t0) / 1000, foc = 2.6 + 2.8 * Math.abs(Math.sin(t / 25)) + (cam === "guide" ? 0.6 : 0);
+  const seed = 1 + (DM.shot++ % 5);
+  const flat = q.flat === "1";
+  const hfd = foc * bin / (bin === 2 ? 1.6 : 1) + rnd() * 0.08, stars = Math.round(40 + Math.min(1, expo / 6) * 280 * (gain / 200 + 0.5) / (1 + (foc - 2.6) * 0.15));
+  let bg = Math.round(300 + gain * 1.8 + expo * 25); if (flat) bg = Math.round(Math.min(65000, 500 + expo * 16000 * (gain / 100) * (DM.flatK || 1)));
+  const noise = Math.round(8 + gain * 0.09), peak = Math.round(8000 * expo / (foc * foc));
+  return { ok: true, demo: true, flat, cam, w: 300, h: 200, seed: cam === "guide" ? 11 : seed, focus: foc, expo, gain, bin, stats: { hfd, stars, peak, bg, noise }, name: (cam === "guide" ? "leit" : "haupt") + "_" + String(DM.shot).padStart(4, "0") };
+}
+function demoGuideStart(q) {
+  const G = DM.guide; if (G.phase !== "idle") return { ok: false, error: "Guiding läuft schon" };
+  Object.assign(G, { phase: "calibrating", log: [], samples: [], rms: null, star: { n: q.multi === "1" ? 8 : 1, snr: 38, hfd: 3.1 }, cfg: q });
+  demoLog(G, "Leitstern(e) gewählt: " + G.star.n); demoLog(G, "Kalibrierung: West " + (profile().guide.calSteps) + " Schritte");
+  let k = 0, x = 0, y = 0;
+  G.timer = setInterval(() => {
+    k++;
+    if (k === 4) demoLog(G, "RA 5,38 px/s, Dec 4,33 px/s, Winkel 3° . Kalibrierung gut");
+    if (k < 6) return;
+    if (G.phase === "calibrating") { G.phase = "guiding"; demoLog(G, "Guiding gestartet"); }
+    const agRa = (parseFloat(q.aggRa) || 70) / 100, agDec = (parseFloat(q.aggDec) || 60) / 100, st = G.star.n > 1 ? 0.7 : 1;
+    x = x * (1 - agRa * 0.6) + rnd() * 0.9 * st + Math.sin(k / 9) * 0.35; y = y * (1 - agDec * 0.5) + rnd() * 0.55 * st + 0.05;
+    G.samples.push([x, y]); if (G.samples.length > 600) G.samples.shift();
+    const n = G.samples.length, sr = Math.sqrt(G.samples.reduce((a, s) => a + s[0] * s[0], 0) / n), sd = Math.sqrt(G.samples.reduce((a, s) => a + s[1] * s[1], 0) / n);
+    G.rms = { ra: sr, dec: sd, tot: Math.hypot(sr, sd) }; G.star = { n: G.star.n, snr: 36 + Math.round(rnd() * 5), hfd: 3.1 + rnd() * 0.2 };
+    if (k % 25 === 0) demoLog(G, "RMS " + G.rms.tot.toFixed(2).replace(".", ",") + "″ (RA " + sr.toFixed(2).replace(".", ",") + "″, Dec " + sd.toFixed(2).replace(".", ",") + "″)");
+  }, 900);
+  return { ok: true };
+}
+function demoGuideState() { const G = DM.guide; return { phase: G.phase, rms: G.rms, samples: G.samples.slice(-300), star: G.star, log: G.log.slice(-10) }; }
+async function demoApi(path) {
+  await sleep(40 + Math.random() * 60);
+  const u = new URL(path, "http://x"), q = Object.fromEntries(u.searchParams), p = u.pathname;
+  if (p === "/api/status") return demoStatus();
+  if (p === "/sky.json") return DEMO_SKY;
+  if (p === "/api/goto") return demoSlew(parseFloat(q.ra), parseFloat(q.dec), q.name || "Ziel");
+  if (p === "/api/align/start") return demoAlignStart(q);
+  if (p === "/api/align") return Object.assign({}, DM.align, { log: DM.align.log.slice(-14), history: DM.align.history.slice(-40) });
+  if (p === "/api/stop") return demoStop();
+  if (p === "/api/shoot") { await sleep(Math.min(1800, (parseFloat(q.expo) || 2) * 250)); return demoShoot(q); }
+  if (p === "/api/guide/start") return demoGuideStart(q);
+  if (p === "/api/guide/stop") { clearInterval(DM.guide.timer); DM.guide.phase = "idle"; demoLog(DM.guide, "Guiding gestoppt"); return { ok: true }; }
+  if (p === "/api/guide/state") return demoGuideState();
+  return { ok: false, error: "unbekannt: " + p };
+}
+
+// Synthetisches Sternfeld für die Demo-Bilder (Zufall aus Startwert, reproduzierbar)
+function mulberry(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function demoImage(r) {
+  if (r.flat) { const w = r.w, h = r.h, cv = document.createElement("canvas"); cv.width = w; cv.height = h; const g = cv.getContext("2d"), L = clamp(r.stats.bg / 65535 * 255, 0, 255), gr = g.createRadialGradient(w / 2, h / 2, 10, w / 2, h / 2, Math.hypot(w, h) / 2); gr.addColorStop(0, `rgb(${L},${L},${L})`); gr.addColorStop(1, `rgb(${L * 0.72},${L * 0.72},${L * 0.72})`); g.fillStyle = gr; g.fillRect(0, 0, w, h); return cv; }
+  const w = r.w, h = r.h, cv = document.createElement("canvas"); cv.width = w; cv.height = h; const g = cv.getContext("2d"), rd = mulberry(r.seed * 7919);
+  const img = g.createImageData(w, h), d = img.data, bg = 18 + r.expo * 2 + r.gain * 0.05;
+  const arr = new Float32Array(w * h); for (let i = 0; i < arr.length; i++) arr[i] = bg + rd() * 7;
+  const n = Math.min(260, r.stats.stars), sig = Math.max(0.9, r.focus * 0.55);
+  for (let k = 0; k < n; k++) {
+    const x = rd() * w, y = rd() * h, m = Math.pow(rd(), 2.6), amp = (30 + 220 * m) * Math.min(1.6, r.expo / 2), R = Math.ceil(sig * 3.2);
+    for (let yy = Math.max(0, Math.floor(y - R)); yy <= Math.min(h - 1, y + R); yy++) for (let xx = Math.max(0, Math.floor(x - R)); xx <= Math.min(w - 1, x + R); xx++) arr[yy * w + xx] += amp * Math.exp(-((xx - x) ** 2 + (yy - y) ** 2) / (2 * sig * sig));
+  }
+  for (let i = 0; i < arr.length; i++) { const v = clamp(arr[i], 0, 255); d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = v; d[i * 4 + 3] = 255; }
+  g.putImageData(img, 0, 0); return cv;
+}
+
+// ---------- Sternkarte (Himmelsansicht, stereographisch)
+const cv = $("map"), ctx = cv.getContext("2d");
+let W = 0, H = 0, DPR = 1, SC = 1, sky = DEMO_SKY, view = { az: 180, alt: 35, fov: 70 };
+const LAYER_DEFS = [["ground", "Boden / Horizont"], ["meridian", "Meridian"], ["eqgrid", "Äquatorgitter (RA/Dec)"], ["azgrid", "Horizontgitter"], ["lines", "Sternbild-Linien"], ["names", "Sternbild-Namen"], ["labels", "Beschriftungen"], ["fov", "Kamerafeld"]];
+const L = Object.assign({ ground: true, meridian: true, eqgrid: true, azgrid: false, lines: true, names: true, labels: true, fov: true }, store.get("layers", {}));
+function toScreen(az, alt) {
+  const A = (az - view.az) * D2R, h = alt * D2R, h0 = view.alt * D2R, cosc = Math.sin(h0) * Math.sin(h) + Math.cos(h0) * Math.cos(h) * Math.cos(A);
+  if (cosc < -0.98) return null; const k = 2 / (1 + cosc);
+  return [W / 2 + k * Math.cos(h) * Math.sin(A) * SC, H / 2 - k * (Math.cos(h0) * Math.sin(h) - Math.sin(h0) * Math.cos(h) * Math.cos(A)) * SC];
+}
+function fromScreen(px, py) {
+  const x = (px - W / 2) / SC, y = -(py - H / 2) / SC, rho = Math.hypot(x, y); if (rho < 1e-9) return [view.az, view.alt];
+  const c = 2 * Math.atan(rho / 2), h0 = view.alt * D2R, alt = Math.asin(Math.cos(c) * Math.sin(h0) + y * Math.sin(c) * Math.cos(h0) / rho);
+  const az = view.az * D2R + Math.atan2(x * Math.sin(c), rho * Math.cos(h0) * Math.cos(c) - y * Math.sin(h0) * Math.sin(c));
+  return [((az * R2D) % 360 + 360) % 360, alt * R2D];
+}
+const starFill = m => { const a = clamp(1.15 - m * 0.14, 0.25, 1); return `rgba(${C["map-star"]},${a})`; };
+function polyline(pts, style, width, dash) {
+  ctx.strokeStyle = style; ctx.lineWidth = width; ctx.setLineDash(dash || []); ctx.beginPath(); let pen = false;
+  pts.forEach((p, i) => { if (!p) { pen = false; return; } const q = pts[i - 1]; if (!pen || !q || Math.hypot(p[0] - q[0], p[1] - q[1]) > W * 0.8) { ctx.moveTo(p[0], p[1]); pen = true; } else ctx.lineTo(p[0], p[1]); });
+  ctx.stroke(); ctx.setLineDash([]);
+}
+function edgeLabel(pts, text, color) {
+  let best = null, bd = 1e9;
+  for (const p of pts) { if (!p || p[0] < 24 || p[0] > W - 24 || p[1] < 70 || p[1] > H - 24) continue; const d = Math.min(p[0], W - p[0], p[1] - 60, H - p[1]); if (d < bd) { bd = d; best = p; } }
+  if (best) { ctx.fillStyle = color; ctx.font = "12px system-ui"; ctx.fillText(text, best[0] + 4, best[1] - 4); }
+}
+function frameRect(ra, dec, color, dashed) {
+  const r = FRAME_ROT * D2R, cr = Math.cos(r), sr = Math.sin(r);
+  const pts = [[-1, -1], [1, -1], [1, 1], [-1, 1], [-1, -1]].map(c => { const x = c[0] * FOV_W / 2, y = c[1] * FOV_H / 2, xr = x * cr - y * sr, yr = x * sr + y * cr, dd = dec + yr, rr = ra - xr / Math.max(0.05, Math.cos(dec * D2R)), a2 = altaz(rr, dd); return toScreen(a2[0], a2[1]); });
+  if (!pts.every(Boolean)) return; ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.setLineDash(dashed ? [6, 4] : []); ctx.beginPath(); pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.stroke(); ctx.setLineDash([]);
+}
+function drawMap() {
+  if (!W) return; F = makeFrame(); SC = (H / 2) / (2 * Math.tan(view.fov * D2R / 4));
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.fillStyle = C.sky; ctx.fillRect(0, 0, W, H);
+  if (L.ground) { const B = 8; ctx.fillStyle = C["map-ground"]; for (let y = 0; y < H; y += B) for (let x = 0; x < W; x += B) if (fromScreen(x + B / 2, y + B / 2)[1] < 0) ctx.fillRect(x, y, B, B); }
+  if (L.azgrid) { for (let a = 15; a < 90; a += 15) { const p = []; for (let z = 0; z <= 360; z += 3) p.push(toScreen(z, a)); polyline(p, C["map-grid"], 1); } for (let z = 0; z < 360; z += 30) { const p = []; for (let a = 0; a <= 90; a += 5) p.push(toScreen(z, a)); polyline(p, C["map-grid"], 1); } }
+  if (L.eqgrid) {
+    for (let h = 0; h < 24; h++) { const p = []; for (let d = -88; d <= 88; d += 4) { const a = altaz(h * 15, d); p.push(toScreen(a[0], a[1])); } polyline(p, C["map-grid"], 1); if (L.labels) edgeLabel(p, h + "h", C["map-label"]); }
+    for (let d = -80; d <= 80; d += 10) { const p = []; for (let r = 0; r <= 360; r += 4) { const a = altaz(r, d); p.push(toScreen(a[0], a[1])); } polyline(p, C["map-grid"], d === 0 ? 1.6 : 1); if (L.labels) edgeLabel(p, (d > 0 ? "+" : "") + d + "°", C["map-label"]); }
+  }
+  if (L.lines) for (const k in sky.cons || {}) for (const ln of sky.cons[k][3]) polyline(ln.map(q => { const a = altaz(q[0], q[1]); return toScreen(a[0], a[1]); }), C["map-line"], 1.4);
+  if (L.ground) { const p = []; for (let a = 0; a <= 360; a += 2) p.push(toScreen(a, 0)); polyline(p, C["map-horizon"], 2.5); }
+  if (L.meridian) { const p = []; for (let a = 0; a <= 90; a += 3) p.push(toScreen(0, a)); for (let a = 87; a >= 0; a -= 3) p.push(toScreen(180, a)); polyline(p, C["map-meridian"], 1.5, [6, 5]); edgeLabel(p, "Meridian", C["map-meridian"]); }
+  const lim = view.fov > 90 ? 5.2 : view.fov > 50 ? 5.9 : 7;
+  for (const s of sky.stars) {
+    if (s[2] > lim) continue; const aa = altaz(s[0], s[1]), p = toScreen(aa[0], aa[1]); if (!p || p[0] < -10 || p[0] > W + 10 || p[1] < -10 || p[1] > H + 10) continue;
+    const r = Math.max(0.8, (7.2 - s[2]) * 0.6 * Math.min(2.2, 0.8 + 40 / view.fov * 0.35)); ctx.fillStyle = starFill(s[2]); ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, 6.2832); ctx.fill();
+    if (L.labels && s[3] && (s[2] < 2.2 || view.fov < 25 && s[2] < 3.5)) { ctx.fillStyle = C["map-name"]; ctx.font = "12px system-ui"; ctx.fillText(s[3], p[0] + r + 3, p[1] - 2); }
+  }
+  if (L.names) { ctx.font = "13px system-ui"; ctx.textAlign = "center"; ctx.fillStyle = C["map-label"]; for (const k in sky.cons || {}) { const c = sky.cons[k], aa = altaz(c[1], c[2]), p = toScreen(aa[0], aa[1]); if (!p || p[0] < 20 || p[0] > W - 20 || p[1] < 80 || p[1] > H - 20) continue; ctx.fillText(c[0].toUpperCase().split("").join(" "), p[0], p[1]); } ctx.textAlign = "left"; }
+  sky.dsos.forEach(d => { d._p = null; });
+  const magLimit = view.fov > 80 ? 6.5 : view.fov > 50 ? 8.5 : view.fov > 25 ? 10.5 : view.fov > 10 ? 12.5 : 99, selName = S.sel && S.sel.name;
+  for (const d of sky.dsos) {
+    if (!d[9] && selName !== d[0] && (d[4] == null ? view.fov > 25 : d[4] > magLimit)) continue;
+    const aa = altaz(d[2], d[3]), p = toScreen(aa[0], aa[1]); if (!p || p[0] < -40 || p[0] > W + 40 || p[1] < -40 || p[1] > H + 40) continue; d._p = p;
+    const rpx = Math.max(4, Math.min(60, (d[5] || 4) / 60 * D2R * SC)), t = d[1], on = selName === d[0];
+    ctx.strokeStyle = on ? C["map-target"] : C["map-dso"]; ctx.lineWidth = on ? 2 : 1.2; ctx.beginPath();
+    if (t === "G" || t === "GPair" || t === "GTrpl" || t === "GGroup") ctx.ellipse(p[0], p[1], rpx, rpx * 0.55, -(d[7] || 0) * D2R, 0, 6.2832);
+    else if (t === "OCl" || t === "Cl+N") { ctx.setLineDash([3, 3]); ctx.arc(p[0], p[1], rpx * 0.8, 0, 6.2832); }
+    else if (t === "GCl") { ctx.arc(p[0], p[1], rpx * 0.7, 0, 6.2832); ctx.moveTo(p[0] - rpx * 0.7, p[1]); ctx.lineTo(p[0] + rpx * 0.7, p[1]); ctx.moveTo(p[0], p[1] - rpx * 0.7); ctx.lineTo(p[0], p[1] + rpx * 0.7); }
+    else if (t === "PN") ctx.arc(p[0], p[1], rpx * 0.5, 0, 6.2832); else ctx.rect(p[0] - rpx * 0.7, p[1] - rpx * 0.7, rpx * 1.4, rpx * 1.4);
+    ctx.stroke(); ctx.setLineDash([]);
+    if (L.labels && (d[9] || view.fov < 40 && d[4] != null && d[4] < 11) || on) { ctx.fillStyle = C["map-name"]; ctx.font = "12px system-ui"; ctx.fillText(d[9] ? "M" + d[9] : d[0], p[0] + rpx + 3, p[1] + 4); }
+  }
+  const m = S.status && S.status.mount;
+  if (m) {
+    const aa = altaz(m.ra, m.dec), p = toScreen(aa[0], aa[1]);
+    if (p) {
+      ctx.strokeStyle = C["map-mount"]; ctx.lineWidth = 2;
+      if (L.fov) frameRect(m.ra, m.dec, C["map-mount"], false);
+      ctx.beginPath(); ctx.arc(p[0], p[1], 9, 0, 6.2832); ctx.moveTo(p[0] - 16, p[1]); ctx.lineTo(p[0] - 5, p[1]); ctx.moveTo(p[0] + 5, p[1]); ctx.lineTo(p[0] + 16, p[1]); ctx.moveTo(p[0], p[1] - 16); ctx.lineTo(p[0], p[1] - 5); ctx.moveTo(p[0], p[1] + 5); ctx.lineTo(p[0], p[1] + 16); ctx.stroke();
+      if (L.fov && L.labels) { ctx.fillStyle = C["map-mount"]; ctx.font = "13px system-ui"; ctx.fillText("SV550 · SV405CC", p[0] + 14, p[1] + 26); }
+    }
+  }
+  if (S.sel && L.fov) frameRect(S.sel.ra, S.sel.dec, C["map-target"], true);
+  if (S.sel) { const aa = altaz(S.sel.ra, S.sel.dec), p = toScreen(aa[0], aa[1]); if (p) { ctx.strokeStyle = C["map-target"]; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p[0], p[1], 14, 0, 6.2832); ctx.stroke(); } }
+  const names = { 0: "N", 90: "O", 180: "S", 270: "W", 45: "NO", 135: "SO", 225: "SW", 315: "NW" }; ctx.fillStyle = C["map-target"]; ctx.font = "bold 18px system-ui"; ctx.textAlign = "center";
+  for (const a in names) { const p = toScreen(+a, 1.5); if (p && p[0] > 10 && p[0] < W - 10 && p[1] > 10 && p[1] < H - 10) ctx.fillText(names[a], p[0], p[1] - 6); } ctx.textAlign = "left";
+}
+let _pend = false; function scheduleDraw() { if (!_pend) { _pend = true; requestAnimationFrame(() => { _pend = false; if ($("map").offsetParent) drawMap(); }); } }
+function resizeMap() { const w = $("mapwrap"); DPR = window.devicePixelRatio || 1; W = w.clientWidth; H = w.clientHeight; cv.width = W * DPR; cv.height = H * DPR; scheduleDraw(); }
+const ptrs = new Map(); let dragMoved = false, pinch0 = null;
+cv.addEventListener("pointerdown", e => { cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]); dragMoved = false; if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch0 = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), fov: view.fov }; } });
+cv.addEventListener("pointermove", e => {
+  if (!ptrs.has(e.pointerId)) return; const old = ptrs.get(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  if (ptrs.size === 2 && pinch0) { const [a, b] = [...ptrs.values()]; view.fov = clamp(pinch0.fov * pinch0.d / Math.hypot(a[0] - b[0], a[1] - b[1]), 1.5, 140); dragMoved = true; scheduleDraw(); return; }
+  const dx = e.clientX - old[0], dy = e.clientY - old[1]; if (Math.hypot(dx, dy) > 0) dragMoved = true;
+  const deg = view.fov / H; view.az = (view.az - dx * deg / Math.max(0.2, Math.cos(view.alt * D2R) * 0.6 + 0.4) + 360) % 360; view.alt = clamp(view.alt + dy * deg, -10, 90); scheduleDraw();
+});
+cv.addEventListener("pointerup", e => { const was = ptrs.get(e.pointerId); ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch0 = null; if (was && !dragMoved) { const r = cv.getBoundingClientRect(); pick(e.clientX - r.left, e.clientY - r.top); } });
+cv.addEventListener("pointercancel", e => { ptrs.delete(e.pointerId); pinch0 = null; });
+cv.addEventListener("wheel", e => { e.preventDefault(); view.fov = clamp(view.fov * (e.deltaY > 0 ? 1.15 : 0.87), 1.5, 140); scheduleDraw(); }, { passive: false });
+const toObj = d => ({ name: d[0], ra: d[2], dec: d[3], type: d[1], mag: d[4], size: d[5], common: d[8], messier: d[9] });
+function pick(px, py) {
+  let best = null, bd = 28;
+  for (const d of sky.dsos) { if (!d._p) continue; const dist = Math.hypot(d._p[0] - px, d._p[1] - py); if (dist < bd) { bd = dist; best = toObj(d); } }
+  if (!best) for (const s of sky.stars) { if (!s[3] && s[2] > 4) continue; const aa = altaz(s[0], s[1]), p = toScreen(aa[0], aa[1]); if (!p) continue; const dist = Math.hypot(p[0] - px, p[1] - py); if (dist < Math.min(bd, 22)) { bd = dist; best = { name: s[3] || "Stern", ra: s[0], dec: s[1], type: "Stern", mag: s[2] }; } }
+  selectObj(best);
+}
+function centerOn(o) { const aa = altaz(o.ra, o.dec); view.az = aa[0]; view.alt = clamp(aa[1], -5, 85); scheduleDraw(); }
+function selectObj(o) { S.sel = o; renderTarget(); scheduleDraw(); }
+function objTitle(o) { return (o.messier ? "M " + o.messier + " · " : "") + o.name.replace(/^M \d+$/, o.name) + (o.common ? " – " + o.common : ""); }
+function renderTarget() {
+  const el = $("targetCard"), o = S.sel, j = S.status && S.status.job, busy = j && j.running;
+  if (busy || (j && j.log.length && !o)) {
+    el.innerHTML = `<div class="row between"><h2>${busy ? "Fährt: " : ""}${j.name || "Ziel"}</h2><span class="tag ${busy ? "warn" : j.error ? "bad" : "ok"}">${busy ? "läuft" : j.error ? "Fehler" : "fertig"}</span></div><div class="log" style="margin-top:8px">${j.log.slice(-6).join("\n")}</div>${busy ? '<button class="btn danger block" style="margin-top:10px" id="jobStop">STOPP</button>' : '<button class="btn ghost block" style="margin-top:10px" id="jobOk">Schließen</button>'}`;
+    const s = $("jobStop"); if (s) s.onclick = doStop; const k = $("jobOk"); if (k) k.onclick = () => { S.status.job.log = []; renderTarget(); };
+    return;
+  }
+  if (!o) { el.innerHTML = `<p class="note" style="margin:0">Tippe in der Karte auf ein Objekt oder suche oben. Gut sichtbares findest du über den Stern.</p>`; return; }
+  F = makeFrame(); const aa = altaz(o.ra, o.dec), t = sky.types[o.type] || (o.type === "Stern" ? "Stern" : "Objekt"), tr = hoursToTransit(o.ra);
+  const warn = aa[1] < 15 ? `<div class="warnbox" style="margin-top:8px">Steht zu niedrig (${aa[1].toFixed(0)}°). Erst ab ca. 15° sinnvoll.</div>` : "";
+  el.innerHTML = `<div class="row between"><h2>${objTitle(o)}</h2><span class="tag">${t}</span></div>
+    <div class="note" style="margin:4px 0 0">${o.mag != null ? o.mag.toFixed(1).replace(".", ",") + " mag · " : ""}${o.size ? (o.size >= 60 ? (o.size / 60).toFixed(1).replace(".", ",") + "°" : o.size.toFixed(0) + "′") + " · " : ""}RA ${fmtRA(o.ra)} · Dec ${fmtDec(o.dec)}</div>
+    <div class="note num" style="margin:2px 0 8px">Jetzt ${aa[1].toFixed(0)}° hoch, Azimut ${aa[0].toFixed(0)}° · ${tr > 0 ? "Meridian in " + tr.toFixed(1).replace(".", ",") + " h" : "Meridian vor " + Math.abs(tr).toFixed(1).replace(".", ",") + " h"}</div>${warn}
+    <div class="row" style="margin-top:8px"><button class="btn primary" style="flex:2" id="btnGo" ${aa[1] < SET.minAlt ? "disabled" : ""}>Anfahren und zentrieren</button><button class="btn ghost" style="flex:1" id="btnShow">In Karte</button></div>`;
+  $("btnGo").onclick = () => gotoObj(o); $("btnShow").onclick = () => centerOn(o);
+}
+async function gotoObj(o) {
+  const aa = altaz(o.ra, o.dec);
+  if (!await ask(o.name + " anfahren?", `Die Montierung fährt los (Ziel jetzt ${aa[1].toFixed(0)}° hoch).\nIst alles frei? Hand am Stecker?`, "Anfahren")) return;
+  const r = await api("/api/goto?" + qs({ ra: o.ra, dec: o.dec, name: o.name, confirm: 1 }));
+  if (!r.ok) { logAdd("Fehler: " + (r.error || "?")); S.status.job = { running: false, name: o.name, log: ["FEHLER: " + (r.error || "?")], error: r.error }; S.sel = null; renderTarget(); return; }
+  S.goalDone = false; logAdd("GoTo " + o.name); S.sel = o; pollNow();
+}
+// Suche, Tipps, Ebenen
+$("search").addEventListener("input", () => {
+  const q = $("search").value.trim().toLowerCase().replace(/\s+/g, ""), box = $("results"); $("tips").style.display = "none"; $("layers").style.display = "none";
+  if (!q) { box.style.display = "none"; return; }
+  const res = [];
+  for (const d of sky.dsos) { const n = [d[0].toLowerCase().replace(/\s+/g, ""), d[9] ? "m" + d[9] : "", (d[8] || "").toLowerCase().replace(/\s+/g, "")]; if (n.some(x => x && x.includes(q))) res.push(d); if (res.length >= 12) break; }
+  for (const s of sky.stars) { if (res.length >= 14) break; if (s[3] && s[3].toLowerCase().replace(/\s+/g, "").includes(q)) res.push([s[3], "Stern", s[0], s[1], s[2], null, null, null, "", 0]); }
+  box.innerHTML = res.map((d, i) => `<div class="li" data-i="${i}"><span>${d[0]}${d[8] ? " – " + d[8] : ""}</span><small>${d[4] != null ? d[4].toFixed(1).replace(".", ",") + " mag" : ""}</small></div>`).join("") || `<div class="li"><span>Nichts gefunden</span></div>`; box.style.display = "block";
+  $$(".li[data-i]", box).forEach(el => el.onclick = () => { const o = toObj(res[+el.dataset.i]); box.style.display = "none"; $("search").value = ""; $("search").blur(); centerOn(o); selectObj(o); });
+});
+$("btnTips").onclick = () => {
+  const box = $("tips"); $("results").style.display = "none"; $("layers").style.display = "none"; if (box.style.display === "block") { box.style.display = "none"; return; }
+  F = makeFrame(); const c = []; for (const d of sky.dsos) { if (!d[9] && !(d[4] != null && d[4] < 9)) continue; const aa = altaz(d[2], d[3]); if (aa[1] >= 30) c.push({ d, alt: aa[1] }); } c.sort((a, b) => (a.d[4] ?? 99) - (b.d[4] ?? 99));
+  box.innerHTML = `<div class="li"><b>Jetzt gut sichtbar (über 30°)</b></div>` + (c.slice(0, 40).map((x, i) => `<div class="li" data-i="${i}"><span>${x.d[0]}${x.d[8] ? " – " + x.d[8] : ""}<br><small>${sky.types[x.d[1]] || ""}</small></span><small>${x.d[4] != null ? x.d[4].toFixed(1).replace(".", ",") + " mag · " : ""}${x.alt.toFixed(0)}°</small></div>`).join("") || `<div class="li"><span>Keine Objekte über 30°</span></div>`); box.style.display = "block";
+  $$(".li[data-i]", box).forEach(el => el.onclick = () => { const o = toObj(c[+el.dataset.i].d); box.style.display = "none"; centerOn(o); selectObj(o); });
+};
+(function () {
+  const box = $("layers"); LAYER_DEFS.forEach(([k, name]) => { const lab = document.createElement("label"), cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!L[k]; cb.onchange = () => { L[k] = cb.checked; store.set("layers", L); scheduleDraw(); }; lab.appendChild(cb); lab.appendChild(document.createTextNode(" " + name)); box.appendChild(lab); });
+  $("btnLayers").onclick = () => { $("results").style.display = "none"; $("tips").style.display = "none"; box.style.display = box.style.display === "block" ? "none" : "block"; };
+})();
+$("btnMountPos").onclick = () => { const m = S.status && S.status.mount; if (m) centerOn(m); };
+
+document.addEventListener("change", e => { if (e.target.id === "mapRot") { let v = parseFloat(String(e.target.value).replace(",", ".")); if (isNaN(v)) v = 0; FRAME_ROT = ((v % 360) + 360) % 360; if (FRAME_ROT > 180) FRAME_ROT -= 360; e.target.value = String(FRAME_ROT).replace(".", ","); store.set("rot", FRAME_ROT); scheduleDraw(); } });
+$("rotSolve").onclick = () => { const s = S.status && S.status.solve; if (!s || s.rot == null) { logAdd("Noch kein Plate-Solve mit Drehung vorhanden"); return; } $("mapRot").value = String(Math.round(s.rot * 10) / 10).replace(".", ","); $("mapRot").dispatchEvent(new Event("change", { bubbles: true })); logAdd("Bildwinkel aus Plate-Solve: " + s.rot.toFixed(1) + "°"); };
+
+// ---------- Allgemeine Bedienelemente
+const LADDER = { imExpo: [0.1, 0.2, 0.5, 1, 2, 3, 4, 5, 6, 8, 10, 15, 20, 30], gdExpo: [0.2, 0.5, 1, 1.5, 2, 3, 4, 5], alExpo: [1, 2, 3, 4, 5, 6, 8, 10, 15] };
+const STEP = { mapRot: [5, -360, 360], alRot: [1, 0.5, 120], alSteps: [1, 2, 8], alGain: [10, 0, 400], imGain: [10, 0, 400], gdGain: [10, 0, 400], gdAggRa: [5, 0, 100], gdAggDec: [5, 0, 100] };
+function inputsFor(id) { const s = new Set(); const a = $(id); if (a) s.add(a); $$(`[data-sync="${id}"]`).forEach(e => s.add(e)); return [...s]; }
+function getVal(id) { const i = inputsFor(id)[0]; return i ? parseFloat(String(i.value).replace(",", ".")) : NaN; }
+function setVal(id, v) { inputsFor(id).forEach(i => { i.value = String(v).replace(".", ","); }); }
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-st]"); if (!b) return; const id = b.dataset.st, d = +b.dataset.d; let v = getVal(id); if (isNaN(v)) v = 0;
+  if (LADDER[id]) { const L2 = LADDER[id]; let i = L2.findIndex(x => x >= v - 1e-9); if (i < 0) i = L2.length - 1; if (L2[i] > v + 1e-9 && d < 0) i = Math.max(0, i - 1); else i = clamp(i + d, 0, L2.length - 1); v = L2[i]; }
+  else { const [st, mn, mx] = STEP[id] || [1, 0, 999]; v = clamp(Math.round((v + d * st) / st * 100) / 100 * st, mn, mx); if (id === "alRot") v = clamp(Math.round(v * 2) / 2, mn, mx); }
+  setVal(id, v); inputsFor(id)[0].dispatchEvent(new Event("change", { bubbles: true }));
+});
+document.addEventListener("change", e => {
+  const t = e.target; if (t.dataset && t.dataset.sync) setVal(t.dataset.sync, t.value);
+  if (t.id === "gdExpo" || t.id === "gdGain" || t.id === "gdAggRa" || t.id === "gdAggDec") saveGuideFromUi();
+  if (["alRot", "alSteps", "alExpo", "alGain", "alRa", "alDec"].includes(t.id)) alSummary();
+});
+document.addEventListener("input", e => { const t = e.target; if (t.dataset && t.dataset.sync) { inputsFor(t.dataset.sync).forEach(i => { if (i !== t) i.value = t.value; }); } });
+const segState = {};
+function segGet(id) { const el = $(id); if (!el) return null; const b = el.querySelector("button.on"); return b ? b.dataset.v : null; }
+document.addEventListener("click", e => {
+  const b = e.target.closest(".seg button"); if (!b) return; const seg = b.parentElement;
+  const group = seg.dataset.segsync ? $$(`[data-segsync="${seg.dataset.segsync}"]`) : [seg];
+  group.forEach(sg => $$("button", sg).forEach(x => x.classList.toggle("on", x.dataset.v === b.dataset.v)));
+  if (seg.id === "alMode") alMode(b.dataset.v); if (["alMode", "alDir", "alStart", "alBin"].includes(seg.id)) alSummary(); if (seg.id === "alStart") $("alPosBox").style.display = b.dataset.v === "pos" ? "grid" : "none";
+  if (seg.id === "imMode") imModeChanged(); if (seg.id === "imStretch") applyStretch(); if (seg.id === "gdDecMode") saveGuideFromUi();
+});
+
+// ---------- Navigation
+const SCREENS = ["verbinden", "einnorden", "ziel", "fokus", "bild", "serie", "guiding", "flats", "einstellungen"];
+function goScreen(n) {
+  if (!SCREENS.includes(n)) n = "verbinden";  S.screen = n; store.set("screen", n); $("app").dataset.screen = n;
+  $$(".screen").forEach(s => s.classList.toggle("on", s.dataset.s === n)); $$(".step").forEach(s => s.classList.toggle("on", s.dataset.go === n));
+  if (n === "ziel") { resizeMap(); renderTarget(); } if (n === "serie") renderSeq(); if (n === "einstellungen") renderSettings(); if (n === "flats") flRender(); if (n === "guiding") { renderGuide(); } updateStrip(); redrawGraphs();
+  if (n !== "fokus" && n !== "bild" && S.img.live && S.img.owner !== "sd") imStop();
+  const sc = document.querySelector(`.screen[data-s="${n}"]`); if (sc) sc.scrollTop = 0;
+}
+document.addEventListener("click", e => { const g = e.target.closest("[data-go]"); if (g) goScreen(g.dataset.go); });
+$("nightBtn").onclick = () => { S.night = NIGHTS[(NIGHTS.indexOf(S.night) + 1) % 3]; store.set("night", S.night); applyNight(); };
+async function doStop() { imStop(); const r = await api("/api/stop"); logAdd(r.ok ? "STOPP gesendet" : "Stopp: " + (r.error || "?")); if (S.sel === null) renderTarget(); pollNow(); }
+$("stopBtn").onclick = doStop;
+
+// ---------- Diagramme
+function drawGraph(cv, series, o) {
+  o = o || {}; const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight; if (!w || !h) return; cv.width = w * dpr; cv.height = h * dpr;
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h); const all = series.flatMap(s => s.data); readColors();
+  let mn = o.min, mx = o.max; if (mn == null) mn = Math.min(0, ...all, 0); if (mx == null) mx = Math.max(o.minMax || 1, ...all);
+  if (o.sym) { const m = Math.max(o.minMax || 2, ...all.map(Math.abs)); mn = -m; mx = m; } if (mx === mn) mx = mn + 1;
+  const px = o.nolabels ? 4 : 30, pt = o.nolabels ? 3 : 8, pb = o.nolabels ? 3 : 14, x = (i, n) => px + (w - px - 8) * (n < 2 ? 0 : i / (n - 1)), y = v => pt + (h - pt - pb) * (1 - (v - mn) / (mx - mn));
+  g.font = "10px system-ui"; g.fillStyle = o.nolabels ? "transparent" : C.dim; g.strokeStyle = C.line; g.lineWidth = 1;
+  const step = o.grid || (mx - mn) / 4; for (let v = Math.ceil(mn / step) * step; v <= mx + 1e-9; v += step) { g.beginPath(); g.moveTo(px, y(v)); g.lineTo(w - 4, y(v)); g.globalAlpha = Math.abs(v) < 1e-9 && o.sym ? 1 : .55; g.stroke(); g.globalAlpha = 1; g.fillText((Math.abs(step) < 1 ? v.toFixed(1) : v.toFixed(0)).replace(".", ",") + (o.unit || ""), 2, y(v) + 3); }
+  if (o.hline != null) { g.strokeStyle = C.accent; g.setLineDash([4, 4]); g.beginPath(); g.moveTo(px, y(o.hline)); g.lineTo(w - 4, y(o.hline)); g.stroke(); g.setLineDash([]); }
+  series.forEach(s => { if (!s.data.length) return; g.strokeStyle = s.color === "accent" ? C.accent : s.color === "warn" ? C.warn : s.color; g.lineWidth = 2; g.lineJoin = "round"; g.setLineDash(s.dash ? [5, 4] : []); g.beginPath(); s.data.forEach((v, i) => i ? g.lineTo(x(i, s.data.length), y(clamp(v, mn, mx))) : g.moveTo(x(i, s.data.length), y(clamp(v, mn, mx)))); g.stroke(); });
+}
+function redrawGraphs() {
+  const a = S.align; if ($("alHist").offsetParent) drawGraph($("alHist"), [{ data: (a && a.history) || [], color: "accent" }], { min: 0, minMax: 5, hline: 1, unit: "′" });
+  if ($("fkHist").offsetParent) drawGraph($("fkHist"), [{ data: S.img.hist, color: "accent" }], { min: 0, minMax: 6, unit: "" });
+  const sm = (S.guide && S.guide.samples) || [];
+  const gOpts = { sym: true, minMax: 3, grid: 1, unit: "″" }, ser = [{ data: sm.map(s => s[0]), color: "accent" }, { data: sm.map(s => s[1]), color: "warn", dash: true }];
+  if ($("gdGraph").offsetParent) drawGraph($("gdGraph"), ser, gOpts); if ($("sdGraph").offsetParent) drawGraph($("sdGraph"), ser, gOpts);
+}
+addEventListener("resize", () => { resizeMap(); redrawGraphs(); });
+
+// ---------- Aufbau, Einstellungen
+function saveProfiles() { const o = {}; for (const k in PROF) o[k] = { guide: PROF[k].guide }; store.set("profiles", o); }
+function fillProfile() {
+  const sel = $("profile"); sel.innerHTML = Object.values(PROF).map(p => `<option value="${p.id}">${p.name}</option>`).join(""); sel.value = S.profileId;
+  const p = profile(), g = p.guide; $("profileInfo").textContent = `${p.sub}. Maßstab Leitkamera ${fmtNum(guideScale(), 2)}″/px, Hauptkamera ${fmtNum(206.265 * MAIN_CAM.pixel / MAIN_CAM.focal, 2)}″/px.`;
+  setVal("gdExpo", g.expo); setVal("gdGain", g.gain); setVal("gdAggRa", g.aggRa); setVal("gdAggDec", g.aggDec); $("gdMulti").checked = !!g.multi; $("gdMultiNote").textContent = `bis zu ${g.multiMax} Sterne, Suchbereich ${g.search} px`;
+  $$("#gdDecMode button").forEach(b => b.classList.toggle("on", b.dataset.v === g.decMode));
+}
+function saveGuideFromUi() { const g = profile().guide; g.expo = getVal("gdExpo") || g.expo; g.gain = getVal("gdGain") || g.gain; g.aggRa = getVal("gdAggRa"); g.aggDec = getVal("gdAggDec"); g.multi = $("gdMulti").checked; g.decMode = segGet("gdDecMode") || "both"; saveProfiles(); }
+$("gdMulti").onchange = saveGuideFromUi;
+$("profile").onchange = () => { S.profileId = $("profile").value; store.set("profile", S.profileId); fillProfile(); renderDevices(); };
+function openSettings() {
+  const p = profile(), g = p.guide, box = $("sheetBox"); let h = `<div class="row between"><h2>${p.name}</h2><button class="btn sm ghost" id="shClose">Fertig</button></div><p class="note" style="margin:6px 0 0">Werte aus dem PHD2-Profil dieser Montierung. Änderungen werden nur auf diesem Gerät gespeichert.</p>`;
+  SETTING_GROUPS.forEach(([title, rows]) => { h += `<h4>${title}</h4><div class="grid2">` + rows.map(([k, label, unit, step]) => `<div class="field"><span>${label}${unit ? " (" + unit + ")" : ""}</span><input class="inp" data-k="${k}" inputmode="decimal" value="${String(g[k]).replace(".", ",")}"></div>`).join("") + "</div>"; });
+  h += `<h4>Verhalten</h4><label class="chk"><input type="checkbox" data-c="multi" ${g.multi ? "checked" : ""}><span>Multi-Star-Guiding</span></label><label class="chk"><input type="checkbox" data-c="decComp" ${g.decComp ? "checked" : ""}><span>Dec-Kompensation (Kalibrierung auf Deklination anpassen)</span></label><label class="chk"><input type="checkbox" data-c="flipDec" ${g.flipDec ? "checked" : ""}><span>Dec-Umkehr nach Meridianflip</span></label><label class="chk"><input type="checkbox" data-c="backlash" ${g.backlash ? "checked" : ""}><span>Backlash-Ausgleich in Dec</span></label>
+    <div class="grid2" style="margin-top:8px"><div class="field"><span>RA-Algorithmus</span><input class="inp" value="${g.raAlgo}" disabled></div><div class="field"><span>Dec-Algorithmus</span><input class="inp" value="${g.decAlgo}" disabled></div></div>
+    <button class="btn ghost block" style="margin-top:14px" id="shReset">Auf PHD2-Werte zurücksetzen</button>`;
+  box.innerHTML = h; $("sheet").classList.add("on");
+  const close = () => { $("sheet").classList.remove("on"); fillProfile(); }; $("shClose").onclick = close; $("sheet").onclick = e => { if (e.target === $("sheet")) close(); };
+  $$("[data-k]", box).forEach(i => i.onchange = () => { const v = parseFloat(i.value.replace(",", ".")); if (!isNaN(v)) g[i.dataset.k] = v; saveProfiles(); });
+  $$("[data-c]", box).forEach(i => i.onchange = () => { g[i.dataset.c] = i.checked; saveProfiles(); });
+  $("shReset").onclick = () => { PROF[p.id].guide = JSON.parse(JSON.stringify(PROFILES[p.id].guide)); saveProfiles(); openSettings(); };
+}
+$("openSettings").onclick = openSettings;
+
+// ---------- Geräte und Anzeigen aus dem Status
+function devRow(id, title, d, extra) {
+  const ok = d && d.ok, el = $(id);
+  el.innerHTML = `<div class="row between"><h3 style="margin:0">${title}</h3><span class="tag ${ok ? "ok" : "bad"}">${ok ? "verbunden" : "nicht erreichbar"}</span></div><div class="note" style="margin-top:6px">${ok ? (d.name || "") + (extra || "") : "Prüfen: Kamera-Dienst gestartet? Kabel am Handy? Handy im WLAN der Montierung, mobile Daten aus?"}</div>`;
+}
+function renderDevices() {
+  const s = S.status; if (!s) return; const dv = s.devices || { mount: { ok: !!s.mount, name: "OnStep" }, main: { ok: false }, guide: { ok: false } }; const m = s.mount;
+  devRow("devMount", "Montierung", dv.mount, dv.mount.host ? " · " + dv.mount.host : "");
+  if (m && dv.mount.ok) $("devMount").insertAdjacentHTML("beforeend", `<div class="stats" style="margin-top:10px;grid-template-columns:repeat(3,1fr)"><div><b>${fmtRA(m.ra)}</b><span>RA</span></div><div><b>${fmtDec(m.dec)}</b><span>Dec</span></div><div><b>${m.parked ? "geparkt" : m.slewing ? "fährt" : m.tracking ? "folgt" : "steht"}</b><span>Nachführung</span></div></div>`);
+  devRow("devCam", "Hauptkamera", dv.main, dv.main && dv.main.ok ? ` · ${dv.main.w}×${dv.main.h}` + (dv.main.temp != null ? ` · ${fmtNum(dv.main.temp, 1)} °C` : "") + " · SV550 480 mm f/6" : "");
+  devRow("devGcam", "Leitkamera", dv.guide, dv.guide && dv.guide.ok ? ` · ${dv.guide.w}×${dv.guide.h}` + (dv.guide.temp != null ? ` · ${fmtNum(dv.guide.temp, 1)} °C` : "") + ` · Leitrohr ${profile().guide.focal} mm` : "");
+}
+function pill(id, cls) { const p = $(id).querySelector(".dot"); p.className = "dot " + (cls || ""); }
+function updateStrip() {
+  const g = S.guide, on = g && (g.phase === "guiding" || g.phase === "calibrating"), el = $("gdStrip"); el.classList.toggle("on", !!on && S.screen !== "guiding");
+  if (!on) return; $("gsRms").textContent = g.phase === "calibrating" ? "kalibriert" : g.rms ? fmtArc(g.rms.tot) : "–"; $("gsRaDec").textContent = g.rms ? "RA " + fmtArc(g.rms.ra) + " · Dec " + fmtArc(g.rms.dec) : "";
+  const sm = g.samples || []; if (el.classList.contains("on")) drawGraph($("gsGraph"), [{ data: sm.map(s => s[0]), color: "accent" }, { data: sm.map(s => s[1]), color: "warn", dash: true }], { sym: true, minMax: 2, grid: 2, nolabels: true });
+}
+function updatePills() {
+  updateStrip();
+  const s = S.status; if (!s) return; const dv = s.devices; pill("pMount", s.mount ? "ok" : "bad"); pill("pCam", dv ? (dv.main.ok ? "ok" : "bad") : ""); pill("pGcam", dv ? (dv.guide.ok ? "ok" : "bad") : "");
+  pill("pTrack", !s.mount ? "" : s.mount.tracking ? "ok" : "warn"); const gp = S.guide && S.guide.phase; pill("pGuide", gp === "guiding" ? "ok" : gp === "calibrating" ? "warn" : "");
+  $("pGuideVal").textContent = gp === "guiding" && S.guide.rms ? fmtArc(S.guide.rms.tot) : gp === "calibrating" ? "kalibriert" : "aus";
+  const j = s.job; $("stopBtn").style.opacity = (j && j.running) || (s.mount && s.mount.slewing) || gp && gp !== "idle" || (S.align && ["measuring", "live", "starting"].includes(S.align.phase)) || S.img.live ? "1" : ".6";
+  const steps = { verbinden: !!s.mount && (!dv || dv.main.ok), einnorden: S.alignDone || S.skipped, ziel: S.goalDone };
+  $$(".step").forEach(b => b.classList.toggle("done", !!steps[b.dataset.go]));
+}
+let lastJobRunning = false;
+async function pollNow() {
+  try {
+    const s = await api("/api/status"); S.status = s; if (SET.siteManual) site = { lat: SET.lat, lon: SET.lon }; else if (s.lat != null) { site = { lat: s.lat, lon: s.lon }; } if (s.time) { nowOffsetMs = Date.parse(s.time) - Date.now(); }
+    if (lastJobRunning && !s.job.running && s.job.result && s.job.result.ok) { S.goalDone = true; S.sel = null; } lastJobRunning = !!s.job.running;
+    if (s.guiding || (S.guide && S.guide.phase && S.guide.phase !== "idle")) await pollGuide();
+    renderDevices(); updatePills(); if (S.screen === "ziel") { renderTarget(); scheduleDraw(); } if (S.align && S.align.phase !== "idle" && S.screen === "einnorden") renderAlignLive();
+  } catch (e) { $("devMount").innerHTML = `<h3>Montierung</h3><p class="note">Keine Verbindung zum Programm auf dem Handy: ${e}</p>`; }
+}
+
+// ---------- Einnorden
+function alMode(v) { if (v === "home") { setVal("alRot", 8); setVal("alSteps", 3); } else { setVal("alRot", 30); setVal("alSteps", 3); } }
+function alSummary() {
+  const rot = getVal("alRot"), n = Math.round(getVal("alSteps")), ex = getVal("alExpo"), dir = segGet("alDir") === "east" ? "Ost" : "West", span = rot * (n - 1), sec = n * (ex + 8) + (n - 1) * (rot * 0.6 + 6);
+  $("alSum").innerHTML = `<b>${n} Aufnahmen</b> in Schritten von <b>${fmtNum(rot, rot % 1 ? 1 : 0)}°</b> nach ${dir}, Gesamtbogen <b>${fmtNum(span, 0)}°</b>, Messung ca. ${fmtDur(sec)}. Nachführung ist währenddessen aus.`;
+  const w = []; if (span < 10) w.push("Kleiner Bogen unter 10°: das Ergebnis wird ungenauer. Besser mehr oder größere Schritte."); if (span > 110) w.push("Bogen über 110°: Die Montierung kommt an den Meridian oder Horizont. Besser kleinere Schritte."); if (ex > 6) w.push("Lange Belichtung ohne Nachführung: Sterne werden zu Strichen und das Plate-Solving schlägt fehl.");
+  if (segGet("alStart") === "pos") { const ra = parseRA(($("alRa").value || "")), de = parseDec(($("alDec").value || "")); if (isNaN(ra) || isNaN(de)) w.push("RA oder Dec nicht lesbar."); else if (90 - Math.abs(de) < 20) w.push("Position näher als 20° am Pol: zu wenig Drehung, das Ergebnis wird schlecht."); }
+  const bx = $("alWarn"); bx.style.display = w.length ? "block" : "none"; bx.innerHTML = w.join("<br>");
+}
+$("alFromMap").onclick = () => { const o = S.sel || (S.status && S.status.mount); if (!o) return; $("alRa").value = hms(o.ra); $("alDec").value = dms(o.dec); alSummary(); };
+$("alGo").onclick = async () => {
+  const q = { confirm: 1, rot: getVal("alRot"), steps: Math.round(getVal("alSteps")), dir: segGet("alDir"), expo: getVal("alExpo"), gain: getVal("alGain"), bin: segGet("alBin"), start: segGet("alStart"), mode: segGet("alMode") };
+  if (q.start === "pos") { q.ra = parseRA($("alRa").value); q.dec = parseDec($("alDec").value); if (isNaN(q.ra) || isNaN(q.dec)) { toast("RA oder Dec nicht lesbar"); return; } }
+  if (!await ask("Messung starten?", `Die Montierung dreht sich in RA ${q.steps - 1} × ${q.rot}° nach ${q.dir === "east" ? "Osten" : "Westen"} (Nachführung aus).${q.start === "pos" ? "\nVorher fährt sie zu RA " + $("alRa").value + ", Dec " + $("alDec").value + "." : ""}\nIst alles frei? Hand am Stecker?`, "Starten")) return;
+  const r = await api("/api/align/start?" + qs(q)); if (!r.ok) { $("alWarn").style.display = "block"; $("alWarn").textContent = r.error || "Fehler"; return; }
+  S.alignDone = false; S.align = { phase: "starting", log: [], history: [] }; $("alSetup").style.display = "none"; $("alLive").style.display = "block"; alPollLoop();
+};
+let alTimer = null;
+function alPollLoop() { clearInterval(alTimer); const tick = async () => { try { S.align = await api("/api/align"); } catch (e) { return; } renderAlignLive(); if (!["starting", "measuring", "live"].includes(S.align.phase)) clearInterval(alTimer); }; tick(); alTimer = setInterval(tick, 1200); }
+function renderAlignLive() {
+  const a = S.align, cur = a.live || a.result, ph = a.phase;
+  $("alTag").textContent = { idle: "bereit", starting: "startet", measuring: "misst", live: "live", done: "fertig", stopped: "beendet", error: "Fehler" }[ph] || ph; $("alTag").className = "tag " + (ph === "done" ? "ok" : ph === "error" ? "bad" : ph === "idle" ? "" : "warn");
+  if (cur) {
+    const ok = cur.total <= 1.0; $("alTotal").textContent = fmtNum(cur.total, 1) + "′"; $("alTotal").style.color = ok ? "var(--ok)" : "";
+    $("alTotalNote").textContent = ph === "done" || ok ? "Gut genug. Schrauben festziehen." : ph === "measuring" || ph === "starting" ? "Messung läuft ..." : "Ziel: unter 1′. Drehe an den Schrauben, die Anzeige folgt live.";
+    $("alAlt").textContent = fmt1(cur.alt); $("alAz").textContent = fmt1(cur.east);
+    $("alAltDir").textContent = Math.abs(cur.alt) < 0.5 ? "passt" : cur.alt > 0 ? "Achse absenken" : "Achse anheben"; $("alAzDir").textContent = Math.abs(cur.east) < 0.5 ? "passt" : cur.east > 0 ? "Achse nach Westen drehen" : "Achse nach Osten drehen";
+  } else { $("alTotal").textContent = "–"; $("alTotalNote").textContent = "Messung läuft ..."; $("alAlt").textContent = $("alAz").textContent = "–"; $("alAltDir").innerHTML = $("alAzDir").innerHTML = "&nbsp;"; }
+  $("alLog").textContent = (ph === "error" ? "FEHLER: " + a.error + "\n" : "") + (a.log || []).slice(-6).join("\n"); $("alStop").textContent = ["starting", "measuring", "live"].includes(ph) ? "Beenden" : "Zurück";
+  if (ph === "done") S.alignDone = true; redrawGraphs(); updatePills();
+}
+$("alStop").onclick = async () => { if (["starting", "measuring", "live"].includes(S.align.phase)) { await doStop(); await sleep(150); S.align = await api("/api/align"); renderAlignLive(); } else { clearInterval(alTimer); $("alLive").style.display = "none"; $("alSetup").style.display = "block"; $("alTag").textContent = "bereit"; $("alTag").className = "tag"; if (S.alignDone) goScreen("ziel"); } };
+
+// ---------- Aufnahme (Fokus, Bild, Seitenleiste)
+const VIEWS = ["fkView", "imView", "sdView"];
+function showFrame(r) {
+  S.img.stretchShown = segGet("imStretch");
+  const draw = src => { S.img.src = src; if (fs.on) fsDraw(); VIEWS.forEach(id => { const c = $(id).querySelector("canvas"), w = c.clientWidth, h = c.clientHeight; if (!w) return; c.width = w; c.height = h; const g = c.getContext("2d"); g.imageSmoothingEnabled = true; g.drawImage(src, 0, 0, w, h); }); };
+  if (r.demo) draw(demoImage(r)); else { const im = new Image(); im.onload = () => draw(im); im.src = r.url + "?stretch=" + (segGet("imStretch") || "auto") + "&t=" + Date.now(); }
+  const st = r.stats || {}, cells = [[fmtNum(st.hfd, 2) + " px", "HFD"], [fmtNum(st.stars, 0), "Sterne"], [fmtNum(st.peak, 0), "Spitze"], [fmtNum(st.bg, 0), "Hintergrund"]];
+  const html = cells.map(c => `<div><b>${c[0]}</b><span>${c[1]}</span></div>`).join(""); $("fkStats").innerHTML = html; $("imStats").innerHTML = html; $("sdStats").innerHTML = html;
+  const cap = `${r.cam === "guide" ? "Leitkamera" : "Hauptkamera"} · ${fmtNum(r.expo, r.expo < 1 ? 1 : 0)} s · Gain ${r.gain}${r.bin === 2 ? " · 2×2" : ""}`; $("fkCap").textContent = cap; $("imCap").textContent = cap; $("sdCap").textContent = fmtNum(st.hfd, 1) + " px";
+  if (st.hfd != null) { S.img.hist.push(st.hfd); if (S.img.hist.length > 60) S.img.hist.shift(); }
+  S.img.last = r; applyStretch(); redrawGraphs();
+}
+function applyStretch() { if (!S.demo) { VIEWS.forEach(id => { $(id).querySelector("canvas").style.filter = "none"; }); if (S.img.last && S.img.last.url && S.img.stretchShown !== segGet("imStretch")) { S.img.stretchShown = segGet("imStretch"); showFrame(S.img.last); } return; } const m = segGet("imStretch"); const f = m === "hart" ? "contrast(1.7) brightness(.9)" : m === "weich" ? "brightness(1.35) contrast(.9)" : "none"; VIEWS.forEach(id => { $(id).querySelector("canvas").style.filter = f; }); }
+async function shootOnce(cam) {
+  const q = { cam: cam || "main", expo: getVal("imExpo"), gain: getVal("imGain"), bin: segGet("imMode") === "x" ? 1 : ($$('[data-segsync="imBin"] button.on')[0] || {}).dataset ? $$('[data-segsync="imBin"] button.on')[0].dataset.v : 1 };
+  VIEWS.forEach(id => { const b = $(id).querySelector(".busy"); b.style.transition = "none"; b.style.transform = "scaleX(0)"; b.getBoundingClientRect(); b.style.transition = "transform " + Math.max(0.4, q.expo) + "s linear"; b.style.transform = "scaleX(1)"; });
+  const r = await api("/api/shoot?" + qs(q)); VIEWS.forEach(id => { $(id).querySelector(".busy").style.transform = "scaleX(0)"; }); if (!r.ok) { logAdd("Aufnahme: " + (r.error || "Fehler")); return null; }
+  showFrame(r); if (S.screen === "bild") addThumb(r); return r;
+}
+function addThumb(r) { const box = $("imThumbs"); if (box.querySelector(".note")) box.innerHTML = ""; const c = document.createElement("canvas"); c.width = 84; c.height = 56; if (S.img.src) c.getContext("2d").drawImage(S.img.src, 0, 0, 84, 56); c.title = r.name + (r.label ? " · " + r.label : ""); c._r = r; c.onclick = () => { showFrame(r); $$("canvas", box).forEach(x => x.classList.toggle("on", x === c)); }; box.prepend(c); while (box.children.length > 12) box.lastChild.remove(); $$("canvas", box).forEach((x, i) => x.classList.toggle("on", i === 0)); }
+// Jedes Bild der Serie erscheint im Bild-Reiter (egal, welcher Reiter gerade offen ist)
+function onSeriesFrame(r, label) { r.label = label; showFrame(r); $("imCap").textContent = label + " · " + $("imCap").textContent; $("imSave").textContent = "Speichern: an"; addThumb(r); }
+function imStop() { S.img.live = false; S.img.owner = null; $$("[data-live]").forEach(b => b.textContent = "Fortlaufend"); $("imGo").textContent = segGet("imMode") === "live" ? "Fortlaufend starten" : "Aufnehmen"; $("fkTag").textContent = "bereit"; $("fkTag").className = "tag"; }
+async function imLive(owner) {
+  if (S.img.live) { imStop(); return; } S.img.live = true; S.img.owner = owner; S.img.hist = [];
+  $$("[data-live]").forEach(b => b.textContent = "Stopp"); $("imGo").textContent = "Stopp"; $("fkTag").textContent = "läuft"; $("fkTag").className = "tag warn";
+  while (S.img.live && S.img.owner === owner) { const r = await shootOnce(); if (!r) { imStop(); break; } await sleep(120); }
+}
+function imModeChanged() { const m = segGet("imMode"); $("imGo").textContent = m === "live" ? "Fortlaufend starten" : m === "series" ? "5 Bilder aufnehmen" : "Aufnehmen"; }
+$$("[data-live]").forEach(b => b.onclick = () => imLive(b.dataset.live)); $$("[data-once]").forEach(b => b.onclick = async () => { if (S.img.live) imStop(); await shootOnce(); });
+$("imGo").onclick = async () => { const m = segGet("imMode"); if (S.img.live) { imStop(); return; } if (m === "live") imLive("im"); else if (m === "series") { for (let i = 0; i < 5; i++) { $("imGo").textContent = "Bild " + (i + 1) + " von 5 ..."; await shootOnce(); } imModeChanged(); } else await shootOnce(); };
+
+// ---------- Serie (Ablauf)
+const defPlan = () => [{ name: "Lights", count: 30, expo: 120, gain: 100 }, { name: "Dunkelbilder", count: 20, expo: 120, gain: 100 }];
+function renderSeq() {
+  const sq = S.seq; if (!sq.plan) sq.plan = defPlan(); const plan = sq.plan, total = plan.reduce((a, r) => a + r.count * r.expo, 0), done = plan.reduce((a, r) => a + (r.done || 0) * r.expo, 0);
+  const tgt = S.sel ? S.sel.name : (S.status && S.status.job && S.status.job.name) || "Aktuelle Position";
+  $("sqHead").innerHTML = `<div class="row between"><h2>${tgt}</h2><span class="tag ${sq.running ? "warn" : ""}">${sq.running ? (sq.paused ? "pausiert" : "läuft") : "bereit"}</span></div><div class="note" style="margin-top:4px">${plan.reduce((a, r) => a + r.count, 0)} Bilder · Belichtungszeit gesamt ${fmtDur(total)}${sq.running ? " · noch " + fmtDur(total - done) : ""}</div><div class="bar" style="margin-top:10px"><i style="width:${total ? done / total * 100 : 0}%"></i></div>`;
+  let cur = plan.findIndex(r => (r.done || 0) < r.count);
+  $("sqList").innerHTML = plan.map((r, i) => `<div class="seqrow ${(r.done || 0) >= r.count ? "done" : sq.running && i === cur ? "run" : ""}" data-i="${i}"><span class="ic">${(r.done || 0) >= r.count ? "✓" : i + 1}</span><div class="tx"><b>${r.name}</b><div class="note">${r.count} × ${fmtNum(r.expo, r.expo < 1 ? 1 : 0)} s · Gain ${r.gain}${r.done ? " · " + r.done + " fertig" : ""}</div></div><span class="note">${fmtDur(r.count * r.expo)}</span></div>`).join("");
+  $$("#sqList .seqrow").forEach(el => el.onclick = () => editRow(+el.dataset.i));
+  $("sqGo").textContent = sq.running ? "Serie beenden" : "Serie starten"; $("sqPause").disabled = !sq.running; $("sqPause").textContent = sq.paused ? "Fortsetzen" : "Pausieren";
+  $("sqGo").disabled = !S.demo && !sq.running; $("sqNote").textContent = S.demo ? "Demo: die Serie läuft im Zeitraffer." : "Die Ablaufsteuerung wird als nächster Baustein angeschlossen. Hier legst du schon den Plan fest, er wird gespeichert.";
+  renderSeqCards();
+  store.set("plan", plan.map(r => ({ name: r.name, count: r.count, expo: r.expo, gain: r.gain })));
+}
+function editRow(i) {
+  const r = S.seq.plan[i], box = $("sheetBox"); box.innerHTML = `<div class="row between"><h2>Satz ${i + 1}</h2><button class="btn sm ghost" id="shClose">Fertig</button></div>
+   <div class="field" style="margin-top:12px"><span>Name</span><input class="inp" id="rwName" value="${r.name}"></div>
+   <div class="three" style="margin-top:10px"><div class="field"><span>Anzahl</span><div class="stepper"><button data-st="rwCount" data-d="-1">−</button><input id="rwCount" value="${r.count}"><button data-st="rwCount" data-d="1">+</button></div></div>
+   <div class="field"><span>Belichtung</span><div class="stepper"><button data-st="rwExpo" data-d="-1">−</button><input id="rwExpo" value="${r.expo}"><small>s</small><button data-st="rwExpo" data-d="1">+</button></div></div>
+   <div class="field"><span>Gain</span><div class="stepper"><button data-st="rwGain" data-d="-1">−</button><input id="rwGain" value="${r.gain}"><button data-st="rwGain" data-d="1">+</button></div></div></div>
+   <button class="btn danger block" style="margin-top:14px" id="rwDel">Satz löschen</button>`;
+  $("sheet").classList.add("on"); const close = () => { r.name = $("rwName").value || r.name; r.count = Math.max(1, getVal("rwCount") || r.count); r.expo = Math.max(0.1, getVal("rwExpo") || r.expo); r.gain = getVal("rwGain") || r.gain; $("sheet").classList.remove("on"); renderSeq(); };
+  $("shClose").onclick = close; $("sheet").onclick = e => { if (e.target === $("sheet")) close(); }; $("rwDel").onclick = () => { S.seq.plan.splice(i, 1); $("sheet").classList.remove("on"); renderSeq(); };
+}
+STEP.rwCount = [1, 1, 999]; STEP.rwGain = [10, 0, 400]; LADDER.rwExpo = [1, 5, 10, 20, 30, 60, 90, 120, 180, 240, 300, 600];
+$("sqAdd").onclick = () => { (S.seq.plan = S.seq.plan || defPlan()).push({ name: "Lights", count: 10, expo: 60, gain: 100 }); renderSeq(); };
+let sqTimer = null;
+async function sqRun(sq) {
+  while (sq.running) {
+    if (sq.paused) { await sleep(300); continue; } const r = sq.plan.find(x => (x.done || 0) < x.count);
+    if (!r) { sq.running = false; logAdd("Serie fertig"); renderSeq(); return; }
+    const res = await api("/api/shoot?" + qs({ cam: "main", expo: S.demo ? 0.4 : r.expo, gain: r.gain, bin: 1, save: 1 })); if (!sq.running) return;
+    if (!res.ok) { logAdd("Serie: " + (res.error || "Fehler")); sq.running = false; renderSeq(); return; }
+    r.done = (r.done || 0) + 1; onSeriesFrame(res, r.name + " " + r.done + "/" + r.count); renderSeq(); await sleep(S.demo ? 250 : 0);
+  }
+}
+$("sqGo").onclick = () => {
+  const sq = S.seq; if (sq.running) { sq.running = false; sq.paused = false; renderSeq(); return; }
+  sq.plan.forEach(r => r.done = 0); sq.running = true; sq.paused = false; renderSeq();
+  sqRun(sq);
+};
+$("sqPause").onclick = () => { S.seq.paused = !S.seq.paused; renderSeq(); };
+
+// ---------- Guiding
+function renderGuide() {
+  const g = S.guide || { phase: "idle" }, ph = g.phase, on = ph === "calibrating" || ph === "guiding";
+  $("gdTag").textContent = { idle: "aus", calibrating: "kalibriert", guiding: "guidet", error: "Fehler" }[ph] || ph; $("gdTag").className = "tag " + (ph === "guiding" ? "ok" : ph === "calibrating" ? "warn" : ph === "error" ? "bad" : "");
+  const r = g.rms; $("gdTot").textContent = r ? fmtArc(r.tot) : "–"; $("gdRa").textContent = r ? fmtArc(r.ra) : "–"; $("gdDec").textContent = r ? fmtArc(r.dec) : "–"; $("sdRms").textContent = r ? fmtArc(r.tot) : "–";
+  $("gdStar").textContent = g.star ? `${g.star.n} Stern${g.star.n > 1 ? "e" : ""} · SNR ${g.star.snr} · HFD ${fmtNum(g.star.hfd, 1)}` : "–"; $("gdLog").textContent = (g.log || []).slice(-8).join("\n"); $("gdGo").disabled = on; $("gdGo").textContent = on ? "Läuft ..." : "Kalibrieren und guiden"; redrawGraphs();
+}
+async function pollGuide() { try { S.guide = await api("/api/guide/state"); } catch (e) { return; } renderGuide(); updatePills(); }
+$("gdGo").onclick = async () => {
+  saveGuideFromUi(); const g = profile().guide, q = { expo: g.expo, gain: g.gain, aggRa: g.aggRa, aggDec: g.aggDec, dec: g.decMode, multi: g.multi ? 1 : 0, multiMax: g.multiMax, focal: g.focal, pixel: g.pixel, profile: S.profileId };
+  const r = await api("/api/guide/start?" + qs(q)); if (!r.ok) { logAdd("Guiding: " + (r.error || "Fehler")); $("gdLog").textContent = "FEHLER: " + (r.error || "?"); return; } S.guide = { phase: "calibrating", samples: [], log: [] }; renderGuide(); pollGuide();
+};
+$("gdStop").onclick = async () => { await api("/api/guide/stop"); await pollGuide(); };
+
+// ---------- Start
+async function detectLive() {
+  if (location.hash === "#demo") return false;
+  try { const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 2500); const r = await fetch("/api/status", { cache: "no-store", signal: ctl.signal }); clearTimeout(t); if (!r.ok) return false; await r.json(); return true; } catch (e) { return false; }
+}
+(async function init() {
+  paintIcons(document); S.demo = !(await detectLive()); $("demoBadge").hidden = !S.demo;
+  applyNight(); fillProfile(); alMode("home"); alSummary(); imModeChanged(); resizeMap();
+  try { const sk = await api("/sky.json"); if (sk && sk.dsos) sky = sk.builtin && !S.demo ? DEMO_SKY : sk; } catch (e) {}
+  if (!S.demo && sky.builtin) logAdd("Nur kleine Objektliste. Mit get_sky.sh lädt sich der große Katalog.");
+  await pollNow(); if (S.status && S.status.mount) { F = makeFrame(); const aa = altaz(S.status.mount.ra, S.status.mount.dec); view.az = aa[0]; view.alt = clamp(aa[1], 5, 80); }
+  goScreen(S.screen); renderSeq(); renderTarget();
+  setInterval(pollNow, 2000); setInterval(() => { if (S.screen === "ziel") scheduleDraw(); }, 15000);
+  logAdd(S.demo ? "Demo-Modus: simulierte Geräte" : "Verbunden mit dem Programm");
+})();
+
+// ---------- Vollbild mit Zoom und Verschieben
+const fs = { z: 1, x: 0, y: 0, on: false }, fsPtr = new Map(); let fsPinch = null;
+function fsDraw() {
+  const c = $("fs").querySelector("canvas"), dpr = window.devicePixelRatio || 1, w = c.clientWidth, h = c.clientHeight, src = S.img.src; c.width = w * dpr; c.height = h * dpr; const g = c.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.fillStyle = "#000"; g.fillRect(0, 0, w, h); if (!src) return;
+  const sw = src.width, sh = src.height, base = Math.min(w / sw, h / sh), s = base * fs.z; g.imageSmoothingEnabled = fs.z < 4; g.filter = $("sdView").querySelector("canvas").style.filter || "none";
+  g.drawImage(src, w / 2 + fs.x - sw * s / 2, h / 2 + fs.y - sh * s / 2, sw * s, sh * s);
+  $("fsInfo").textContent = (S.img.last ? (S.img.last.cam === "guide" ? "Leitkamera" : "Hauptkamera") + " · " : "") + "Zoom " + fmtNum(fs.z * 100, 0) + " %";
+}
+function fsOpen() { if (!S.img.src) return; fs.z = 1; fs.x = fs.y = 0; fs.on = true; $("fs").classList.add("on"); fsDraw(); }
+function fsClose() { fs.on = false; $("fs").classList.remove("on"); }
+function fsZoom(f, cx, cy) { const c = $("fs").querySelector("canvas"), ox = cx - c.clientWidth / 2 - fs.x, oy = cy - c.clientHeight / 2 - fs.y, nz = clamp(fs.z * f, 1, 40), k = nz / fs.z; fs.x -= ox * (k - 1); fs.y -= oy * (k - 1); fs.z = nz; if (nz === 1) fs.x = fs.y = 0; fsDraw(); }
+$$(".viewer").forEach(v => v.addEventListener("click", fsOpen)); $("fsClose").onclick = fsClose; $("fsReset").onclick = () => { fs.z = 1; fs.x = fs.y = 0; fsDraw(); };
+(function () {
+  const el = $("fs"); let moved = false, lastTap = 0;
+  el.addEventListener("pointerdown", e => { if (e.target.closest("#fsBar")) return; el.setPointerCapture(e.pointerId); fsPtr.set(e.pointerId, [e.clientX, e.clientY]); moved = false; if (fsPtr.size === 2) { const [a, b] = [...fsPtr.values()]; fsPinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]) }; } });
+  el.addEventListener("pointermove", e => { if (!fsPtr.has(e.pointerId)) return; const o = fsPtr.get(e.pointerId); fsPtr.set(e.pointerId, [e.clientX, e.clientY]); moved = true;
+    if (fsPtr.size === 2 && fsPinch) { const [a, b] = [...fsPtr.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]); fsZoom(d / fsPinch.d, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2); fsPinch.d = d; return; }
+    if (fs.z > 1) { fs.x += e.clientX - o[0]; fs.y += e.clientY - o[1]; fsDraw(); } });
+  el.addEventListener("pointerup", e => { fsPtr.delete(e.pointerId); if (fsPtr.size < 2) fsPinch = null; if (!moved && fsPtr.size === 0) { const t = Date.now(); if (t - lastTap < 320) { fs.z > 1.5 ? (fs.z = 1, fs.x = fs.y = 0, fsDraw()) : fsZoom(3, e.clientX, e.clientY); } lastTap = t; } });
+  el.addEventListener("pointercancel", e => { fsPtr.delete(e.pointerId); fsPinch = null; });
+  el.addEventListener("wheel", e => { e.preventDefault(); fsZoom(e.deltaY < 0 ? 1.25 : 0.8, e.clientX, e.clientY); }, { passive: false });
+  addEventListener("keydown", e => { if (e.key === "Escape" && fs.on) fsClose(); }); addEventListener("resize", () => { if (fs.on) fsDraw(); });
+})();
+
+// ---------- Fortschritt der Serie (Bild-Fenster und Seitenleiste)
+function seqStats() {
+  const plan = S.seq.plan || defPlan(), tot = plan.reduce((a, r) => a + r.count, 0), done = plan.reduce((a, r) => a + Math.min(r.done || 0, r.count), 0);
+  const secAll = plan.reduce((a, r) => a + r.count * (r.expo + 5), 0), secDone = plan.reduce((a, r) => a + Math.min(r.done || 0, r.count) * (r.expo + 5), 0);
+  const cur = plan.find(r => (r.done || 0) < r.count);
+  return { plan, tot, done, secLeft: secAll - secDone, cur, pct: tot ? done / tot * 100 : 0 };
+}
+function seqCardHtml() {
+  const sq = S.seq, st = seqStats(), end = new Date(Date.now() + st.secLeft * 1000), endTxt = end.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  const tag = sq.running ? (sq.paused ? "pausiert" : "läuft") : st.done && st.done >= st.tot ? "fertig" : "bereit";
+  let h = `<div class="row between"><h3 style="margin:0">Sequenz</h3><span class="tag ${sq.running ? "warn" : st.done >= st.tot && st.tot ? "ok" : ""}">${tag}</span></div><div class="seqmini">`;
+  if (sq.running && st.cur) h += `<div class="row between" style="margin-top:6px"><span><b>${st.cur.name}</b> ${(st.cur.done || 0) + 1} von ${st.cur.count}</span><span class="note">${fmtNum(st.cur.expo, st.cur.expo < 1 ? 1 : 0)} s · Gain ${st.cur.gain}</span></div><div class="bar"><i style="width:${(st.cur.done || 0) / st.cur.count * 100}%"></i></div>`;
+  h += `<div class="row between"><span>Gesamt <b>${st.done}</b> von <b>${st.tot}</b> Bildern</span><span class="note">${fmtNum(st.pct, 0)} %</span></div><div class="bar"><i style="width:${st.pct}%"></i></div>`;
+  h += `<div class="row between note"><span>${sq.running || st.done ? "noch " + fmtDur(st.secLeft) : "Dauer " + fmtDur(st.secLeft)}</span><span>${sq.running ? "Ende ca. " + endTxt + " Uhr" : ""}</span></div></div>`;
+  return h;
+}
+function renderSeqCards() { const h = seqCardHtml(); $("imSeq").innerHTML = h; $("sdSeq").innerHTML = h; }
+renderSeqCards();
+
+// ---------- Flat-Assistent
+const FLSRC = { panel: "Flatpanel auf das Teleskop legen und einschalten. Die Belichtung wird einmal ermittelt und bleibt dann gleich.", sky: "Dämmerhimmel: Teleskop Richtung Zenit, Nachführung aus. Das Licht ändert sich, deshalb prüft der Assistent die Helligkeit alle 5 Bilder und passt die Belichtung an.", cloth: "Weißes Tuch straff über die Taukappe spannen und gleichmäßig beleuchten (Tablet mit weißer Fläche oder Lampe). Belichtung wird einmal ermittelt." };
+const FL = { running: false, stop: false, expo: 1, level: null, done: 0, total: 0, phase: "", result: null, log: [] };
+STEP.flCount = [5, 5, 200]; STEP.flTarget = [5, 20, 80]; STEP.flGain = [10, 0, 400];
+function flLog(t) { FL.log.push(new Date().toLocaleTimeString("de-DE") + " " + t); FL.log = FL.log.slice(-30); $("flLog").textContent = FL.log.slice(-7).join("\n"); }
+function flRender() {
+  const tgt = getVal("flTarget") || 50, tol = 10;
+  $("flSrcNote").textContent = FLSRC[segGet("flSrc")]; $("flBand").style.left = Math.max(0, tgt - tol) + "%"; $("flBand").style.width = tol * 2 + "%";
+  $("flLevel").textContent = FL.level == null ? "–" : fmtNum(FL.level, 0) + " % (Ziel " + tgt + " %)"; $("flFill").style.width = clamp(FL.level || 0, 0, 100) + "%";
+  $("flExpo").textContent = "Belichtung " + (FL.phase ? fmtNum(FL.expo, FL.expo < 1 ? 3 : 2) + " s" : "–"); $("flStep").textContent = FL.phase || "–"; $("flProg").style.width = FL.total ? FL.done / FL.total * 100 + "%" : "0";
+  $("flGo").disabled = FL.running; $("flStop").disabled = !FL.running; $("flTag").textContent = FL.running ? "läuft" : FL.result ? "fertig" : "bereit"; $("flTag").className = "tag " + (FL.running ? "warn" : FL.result ? "ok" : "");
+  const d = $("flDone"); d.style.display = FL.result ? "block" : "none"; if (FL.result) { const r = FL.result; d.innerHTML = `<h3>Ergebnis</h3><div class="setrow"><span>Flats</span><b>${r.flats} × ${fmtNum(r.expo, r.expo < 1 ? 3 : 2)} s, Gain ${r.gain}</b></div><div class="setrow"><span>Helligkeit (Median)</span><b>${fmtNum(r.level, 0)} %</b></div><div class="setrow"><span>Dark-Flats</span><b>${r.darks ? r.darks + " × " + fmtNum(r.expo, r.expo < 1 ? 3 : 2) + " s" : "keine"}</b></div><p class="note" style="margin:8px 0 0">${S.demo ? "Demo: es werden keine Dateien geschrieben." : "Die Dateien liegen im Bilderordner des Kamera-Dienstes (Termux: ~/svb/frames)."}</p>`; }
+}
+document.addEventListener("click", e => { const b = e.target.closest("#flSrc button, #flBin button"); if (b) flRender(); });
+document.addEventListener("change", e => { if (["flCount", "flTarget", "flGain"].includes(e.target.id)) flRender(); });
+async function flShoot(save, level) {
+  const q = { cam: "main", expo: FL.expo, gain: getVal("flGain"), bin: segGet("flBin"), flat: 1, save: save ? 1 : 0 };
+  VIEWS.concat([]).forEach(id => { const b = $(id).querySelector(".busy"); b.style.transition = "none"; b.style.transform = "scaleX(0)"; b.getBoundingClientRect(); b.style.transition = "transform " + Math.max(0.3, FL.expo) + "s linear"; b.style.transform = "scaleX(1)"; });
+  const r = await api("/api/shoot?" + qs(q)); VIEWS.forEach(id => { $(id).querySelector(".busy").style.transform = "scaleX(0)"; });
+  if (!r.ok) throw new Error(r.error || "Aufnahme fehlgeschlagen"); showFrame(r); $("flCap").textContent = `Flat · ${fmtNum(FL.expo, 3)} s · Gain ${r.gain}`;
+  if (level) FL.level = r.stats.bg / SET.saturation * 100; flRender(); return r;
+}
+async function flAutoExpo() {
+  const tgt = getVal("flTarget") || 50, tol = 10, gain = getVal("flGain"); FL.phase = "Belichtung ermitteln";
+  for (let i = 0; i < 9 && !FL.stop; i++) {
+    await flShoot(false, true); flLog(`Versuch ${i + 1}: ${fmtNum(FL.expo, 3)} s → ${fmtNum(FL.level, 0)} %`);
+    if (Math.abs(FL.level - tgt) <= tol / 2) return true;
+    if (FL.level >= 98) { FL.expo = Math.max(0.001, FL.expo / 4); continue; }
+    const f = clamp((tgt - 1) / Math.max(0.5, FL.level - 1), 0.25, 4); const ne = clamp(FL.expo * f, 0.001, 30);
+    if (ne === FL.expo && Math.abs(FL.level - tgt) > tol) throw new Error(FL.level < tgt ? "Zu dunkel: auch bei 30 s zu wenig Licht. Quelle heller machen oder Gain erhöhen." : "Zu hell: schon bei 0,001 s zu viel Licht. Quelle dimmen oder Gain senken.");
+    FL.expo = ne;
+  }
+  if (FL.stop) return false; throw new Error("Die Helligkeit lässt sich nicht einstellen. Lichtquelle gleichmäßig? Kamera sieht das Licht?");
+}
+$("flGo").onclick = async () => {
+  if (FL.running) return; const n = Math.round(getVal("flCount")), dark = $("flDark").checked, src = segGet("flSrc"), tgt = getVal("flTarget") || 50, gain = getVal("flGain");
+  if (!await ask("Flats starten?", "Teleskop auf der Lichtquelle (" + (src === "panel" ? "Flatpanel an" : src === "sky" ? "Dämmerhimmel, Zenit" : "Tuch beleuchtet") + "), Fokus nicht mehr verstellen.", "Starten", false, true)) return;
+  Object.assign(FL, { running: true, stop: false, done: 0, total: n + (dark ? n : 0), result: null, level: null, expo: FL.expo || 1, log: [] }); S.img.live = false; flRender();
+  try {
+    if (S.demo) DM.flatK = src === "sky" ? 1 : src === "cloth" ? 0.6 : 1;
+    FL.expo = clamp(FL.expo, 0.001, 30); await flAutoExpo(); if (FL.stop) throw 0; flLog(`Belichtung festgelegt: ${fmtNum(FL.expo, 3)} s`);
+    FL.phase = "Flats aufnehmen"; let sum = 0;
+    for (let i = 0; i < n && !FL.stop; i++) {
+      if (src === "sky" && i % 5 === 4) { const r = await flShoot(false, true); if (Math.abs(r.stats.bg / SET.saturation * 100 - tgt) > 5) { FL.expo = clamp(FL.expo * (tgt / Math.max(1, FL.level)), 0.001, 30); flLog("Himmel ändert sich, Belichtung " + fmtNum(FL.expo, 3) + " s"); } }
+      const r = await flShoot(true, true); sum += FL.level; FL.done = i + 1; FL.phase = `Flat ${i + 1} von ${n}`; flRender();
+    }
+    if (FL.stop) throw 0; let darks = 0;
+    if (dark) {
+      if (!await ask("Dark-Flats", "Teleskop jetzt komplett abdecken (Deckel drauf, Licht aus). Dann „Weiter“.", "Weiter", false, true)) throw 0;
+      FL.phase = "Dark-Flats aufnehmen"; if (S.demo) DM.flatK = 0.0001;
+      for (let i = 0; i < n && !FL.stop; i++) { await flShoot(true, false); FL.done = n + i + 1; darks = i + 1; FL.phase = `Dark-Flat ${i + 1} von ${n}`; flRender(); }
+    }
+    if (FL.stop) throw 0; FL.result = { flats: n, darks, expo: FL.expo, gain, level: sum / n }; FL.phase = "fertig"; flLog("Fertig: " + n + " Flats" + (darks ? " und " + darks + " Dark-Flats" : ""));
+  } catch (e) { if (e) { flLog("FEHLER: " + e.message); $("flTag").textContent = "Fehler"; } else flLog("Abgebrochen"); }
+  FL.running = false; if (S.demo) DM.flatK = 1; flRender();
+};
+$("flStop").onclick = () => { FL.stop = true; flLog("Stopp angefordert"); };
+VIEWS.push("flView"); $("flView").addEventListener("click", fsOpen);
+
+// ---------- App-Einstellungen
+function applySettings() {
+  document.documentElement.dataset.big = SET.big ? "1" : "0";
+  FOV_W = SET.camW * SET.mainPixel / SET.mainFocal * 206.265 / 3600; FOV_H = SET.camH * SET.mainPixel / SET.mainFocal * 206.265 / 3600; MAIN_CAM.pixel = SET.mainPixel; MAIN_CAM.focal = SET.mainFocal;
+  setVal("imExpo", SET.defExpo); setVal("imGain", SET.defGain); scheduleDraw();
+  if (SET.wake) wakeOn(); else wakeOff();
+}
+let wl = null;
+async function wakeOn() { try { if (navigator.wakeLock && !wl) { wl = await navigator.wakeLock.request("screen"); wl.addEventListener("release", () => { wl = null; }); } } catch (e) { wl = null; } }
+function wakeOff() { try { if (wl) wl.release(); } catch (e) {} wl = null; }
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && SET.wake) wakeOn(); });
+function setRow(label, hint, ctl) { return `<div class="setrow"><span>${label}${hint ? "<small>" + hint + "</small>" : ""}</span>${ctl}</div>`; }
+const setNum = (k, step) => `<input class="inp" data-set="${k}" inputmode="decimal" value="${String(SET[k]).replace(".", ",")}">`;
+const setChk = k => `<input type="checkbox" data-set="${k}" ${SET[k] ? "checked" : ""} style="width:26px;height:26px;accent-color:var(--accent)">`;
+function renderSettings() {
+  const fovTxt = `${fmtNum(FOV_W, 2)}° × ${fmtNum(FOV_H, 2)}°, ${fmtNum(206.265 * SET.mainPixel / SET.mainFocal, 2)}″/px`;
+  $("setBody").innerHTML = `<h2>Einstellungen</h2>
+  <div class="card"><h3>Anzeige</h3>
+    ${setRow("Nachtmodus", "", `<div class="seg" id="setNight">${NIGHTS.map(n => `<button data-v="${n}" class="${S.night === n ? "on" : ""}">${NIGHT_NAME[n]}</button>`).join("")}</div>`)}
+    ${setRow("Große Bedienelemente", "Größere Tasten, z. B. mit Handschuhen", setChk("big"))}
+    ${setRow("Bildschirm anlassen", "Display bleibt während der Sitzung an", setChk("wake"))}</div>
+  <div class="card"><h3>Sicherheit</h3>
+    ${setRow("Rückfrage vor Fahrten", "Bestätigung vor GoTo und Messungen", setChk("confirm"))}
+    ${setRow("Mindesthöhe für GoTo", "Ziele darunter lassen sich nicht anfahren", setNum("minAlt") + "°")}</div>
+  <div class="card"><h3>Standort</h3>
+    ${setRow("Aus der Montierung", "Sonst feste Werte unten", `<div class="seg" id="setSite"><button data-v="mount" class="${SET.siteManual ? "" : "on"}">Montierung</button><button data-v="manual" class="${SET.siteManual ? "on" : ""}">Fest</button></div>`)}
+    ${setRow("Breite", "Grad, Nord positiv", setNum("lat"))}${setRow("Länge", "Grad, Ost positiv", setNum("lon"))}</div>
+  <div class="card"><h3>Hauptkamera und Optik</h3>
+    ${setRow("Pixelgröße", "µm", setNum("mainPixel"))}${setRow("Brennweite", "mm (SV550: 480)", setNum("mainFocal"))}${setRow("Bildgröße Breite", "Pixel", setNum("camW"))}${setRow("Bildgröße Höhe", "Pixel", setNum("camH"))}
+    <p class="note" style="margin:8px 0 0">Bildfeld: ${fovTxt}. Das Kamerafeld in der Karte richtet sich danach.</p></div>
+  <div class="card"><h3>Aufnahme</h3>
+    ${setRow("Standard-Belichtung", "s, für Fokus und Bild", setNum("defExpo"))}${setRow("Standard-Gain", "", setNum("defGain"))}${setRow("Sättigungswert", "für die Helligkeit der Flats (16 Bit: 65535)", setNum("saturation"))}</div>
+  <div class="card"><h3>Aufbau und Guiding</h3><button class="btn block" id="setProf">Aufbau bearbeiten (PHD2-Werte)</button></div>
+  <div class="card"><h3>Verbindung</h3>
+    <p class="note" style="margin:0">Montierung: <b class="num">${S.status && S.status.devices && S.status.devices.mount && S.status.devices.mount.host || "–"}</b><br>Kamera-Dienste: Hauptkamera Port 8765, Leitkamera Port 8766. Diese Adressen werden beim Start von <b>ui_server.py</b> gesetzt (ONSTEP_HOST, CAM_URL, GUIDE_URL).</p></div>
+  <div class="card"><h3>Daten</h3><div class="row"><button class="btn ghost" style="flex:1" id="setResetPlan">Serienplan zurücksetzen</button><button class="btn danger" style="flex:1" id="setResetAll">Alles zurücksetzen</button></div>
+    <p class="note" style="margin:10px 0 0">Oberfläche Version 4${S.demo ? " (Demo)" : ""}. Einstellungen liegen nur auf diesem Gerät.</p></div>`;
+  const root = $("setBody");
+  $$("[data-set]", root).forEach(i => i.onchange = () => { const k = i.dataset.set; if (i.type === "checkbox") SET[k] = i.checked; else { const v = parseFloat(String(i.value).replace(",", ".")); if (!isNaN(v)) SET[k] = v; } saveSet(); applySettings(); if (i.type !== "checkbox") renderSettings(); });
+  $$("#setNight button", root).forEach(b => b.onclick = () => { S.night = b.dataset.v; store.set("night", S.night); applyNight(); renderSettings(); });
+  $$("#setSite button", root).forEach(b => b.onclick = () => { SET.siteManual = b.dataset.v === "manual"; saveSet(); if (SET.siteManual) site = { lat: SET.lat, lon: SET.lon }; renderSettings(); });
+  $("setProf").onclick = openSettings;
+  $("setResetPlan").onclick = async () => { if (await ask("Serienplan zurücksetzen?", "Der gespeicherte Ablauf wird durch den Standardplan ersetzt.", "Zurücksetzen", true, true)) { S.seq.plan = defPlan(); renderSeq(); } };
+  $("setResetAll").onclick = async () => { if (await ask("Alles zurücksetzen?", "Einstellungen, Aufbau-Werte, Plan und Kartenebenen auf diesem Gerät werden gelöscht.", "Alles löschen", true, true)) { try { Object.keys(localStorage).filter(k => k.startsWith("astro.")).forEach(k => localStorage.removeItem(k)); } catch (e) {} location.reload(); } };
+}
+applySettings();
+
+</script>
+</body>
+</html>
